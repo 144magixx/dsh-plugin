@@ -1,0 +1,26 @@
+﻿PASS card opens from toggle state
+PASS project name
+PASS changes merged :: +517 −6 +88 −2
+PASS missing turn note
+PASS subagents summary
+PASS sources listed
+PASS show all reveals the referenced session :: 查看全部（6）
+PASS referenced session navigates :: ["openSession","sess-log"]
+PASS plan section
+PASS generated files
+PASS jobs section
+PASS related fork
+PASS partial note
+PASS watched jobs
+PASS anchored below header right edge :: 58,1412 vs 58,1412
+PASS change opens native review :: ["openResource","dsh-resource://changes-review/session/sess-paper/21/2",{"params":{"index":2}}]
+PASS subagent opens in sidebar :: ["openResource","dsh-resource://subagentchat/session/sub-4?parent=sess-paper&mode=one-shot",{"kind":"subagentchat","preferNewPane":true}]
+PASS web source opens browser tab :: ["openTab","browser",{"params":{"url":"https://en.wikipedia.org/wiki/Tabu_search"}}]
+PASS show more expands changes :: 3 -> 6 (再显示 3 项)
+PASS section collapses and is remembered
+PASS outside press closes unpinned card
+PASS toggle reopens
+PASS pinned card ignores outside press and Escape
+PASS close button closes and unpins
+PASS Escape closes unpinned card and is consumed
+PASS job stream released after close

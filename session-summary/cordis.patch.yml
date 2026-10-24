@@ -1,0 +1,4 @@
+# Add only this plugin; never replace native conversation, sidebar or session rows.
+- insert:
+    - id: dsh-session-summary
+      name: dsh-session-summary

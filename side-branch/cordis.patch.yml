@@ -1,0 +1,4 @@
+# Add only this plugin; never replace native conversation or permission rows.
+- insert:
+    - id: dsh-side-branch
+      name: dsh-side-branch

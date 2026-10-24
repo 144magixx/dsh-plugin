@@ -1,0 +1,17 @@
+# Shared generated output rules for independent plugin projects.
+**/node_modules/
+**/artifacts/*
+!**/artifacts/.gitkeep
+**/.runtime/
+**/.integration-data/
+**/.test-data/
+*.log
+*.tgz
+
+# OS / editor noise
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/

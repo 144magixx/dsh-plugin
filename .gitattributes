@@ -1,0 +1,8 @@
+# Store and check out text with LF on every OS, so the packed npm tarballs and
+# byte-for-byte package verification are identical on Windows and macOS.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.tgz binary
