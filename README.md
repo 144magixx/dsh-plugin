@@ -14,7 +14,7 @@
 ## 获取代码
 
 ```sh
-git clone https://github.com/<owner>/dsh-plugin.git
+git clone https://github.com/144magixx/dsh-plugin.git
 ```
 
 macOS 与 Windows 通用；仓库通过 `.gitattributes` 统一使用 LF 换行，两个平台检出的文件逐字节一致。
