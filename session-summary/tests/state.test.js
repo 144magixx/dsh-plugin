@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client } from './client-core.mjs';
 
-const { createStore, sanitizePrefs, createSummaryCache, createApi, STORAGE_KEY } = client;
+const { createStore, sanitizePrefs, createSummaryCache, createApi, cardPlacement, STORAGE_KEY } = client;
 const plain = value => JSON.parse(JSON.stringify(value));
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -14,16 +14,16 @@ function memoryStorage(initial = {}) {
 test('preferences persist pinned state and only known collapsed sections', () => {
   const storage = memoryStorage({ [STORAGE_KEY]: JSON.stringify({ pinned: true, collapsed: { sources: true, bogus: true, jobs: false }, extra: 1 }) });
   const prefs = createStore(sanitizePrefs({}), { storage, key: STORAGE_KEY, sanitize: sanitizePrefs });
-  assert.deepEqual(plain(prefs.getSnapshot()), { pinned: true, collapsed: { sources: true } });
+  assert.deepEqual(plain(prefs.getSnapshot()), { pinned: true, collapsed: { sources: true }, position: null });
   let notified = 0;
   prefs.subscribe(() => { notified++; });
   prefs.set({ pinned: true });
   assert.equal(notified, 0, 'unchanged values do not notify');
   prefs.set({ pinned: false });
   assert.equal(notified, 1);
-  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)), { pinned: false, collapsed: { sources: true } });
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)), { pinned: false, collapsed: { sources: true }, position: null });
   const broken = createStore(sanitizePrefs({}), { storage: memoryStorage({ [STORAGE_KEY]: '{not json' }), key: STORAGE_KEY, sanitize: sanitizePrefs });
-  assert.equal(broken.getSnapshot().pinned, false);
+  assert.equal(broken.getSnapshot().pinned, true);
   const failing = createStore({ a: 1 }, { storage: { getItem: () => null, setItem: () => { throw new Error('quota'); } }, key: 'k' });
   failing.set({ a: 2 });
   assert.equal(failing.getSnapshot().a, 2, 'storage failures keep the in-memory state usable');
@@ -61,11 +61,11 @@ test('summary cache maps Host responses, never retries automatically and retries
   assert.equal(calls.length, 9, 'a disposed cache reads nothing');
 });
 
-function harness(services = {}) {
+function harness(services = {}, storage = memoryStorage()) {
   const ctx = { get: name => services[name] };
   const opened = [];
   const api = createApi(ctx, {
-    storage: memoryStorage(),
+    storage,
     fetchImpl: async () => ({ status: 404, ok: false }),
     transportFetch: async (url, init) => ({ json: async () => (services.sideBranchReply?.(url, init) ?? { ok: false }) }),
     clipboard: services.clipboard,
@@ -76,7 +76,8 @@ function harness(services = {}) {
 
 test('open, close, pin and session ownership follow the Codex pinned-summary model', () => {
   const { api } = harness();
-  api.open('a');
+  assert.equal(api.prefs.getSnapshot().pinned, true, 'a fresh installation opens and pins automatically');
+  api.togglePin('a');
   assert.equal(api.ui.getSnapshot().openSession, 'a');
   api.forgetOtherSession('a');
   assert.equal(api.ui.getSnapshot().openSession, 'a');
@@ -168,4 +169,57 @@ test('navigation uses native services and degrades without them', async () => {
   assert.equal(bare.canOpenFilesTab(), false);
   assert.equal(bare.hasSideBranch(), false);
   bare.refreshProjections('child');
+});
+
+
+test('defaults respect saved choices and survive missing, corrupt or unavailable storage', () => {
+  for (const value of [null, '{broken', '{}', 'null', '{"pinned":"false"}', '{"collapsed":{"sources":true}}']) {
+    const storage = memoryStorage(value === null ? {} : { [STORAGE_KEY]: value });
+    assert.equal(harness({}, storage).api.prefs.getSnapshot().pinned, true);
+  }
+  const blocked = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+  assert.equal(harness({}, blocked).api.prefs.getSnapshot().pinned, true);
+  for (const pinned of [true, false]) {
+    const storage = memoryStorage({ [STORAGE_KEY]: JSON.stringify({ pinned, collapsed: { jobs: true } }) });
+    const { api } = harness({}, storage);
+    assert.equal(api.prefs.getSnapshot().pinned, pinned);
+    assert.deepEqual(plain(api.prefs.getSnapshot().collapsed), { jobs: true });
+  }
+  const storage = memoryStorage();
+  const { api } = harness({}, storage);
+  api.close();
+  assert.equal(harness({}, storage).api.prefs.getSnapshot().pinned, false, 'closing is remembered on reload');
+  api.open('a');
+  api.togglePin('a');
+  assert.equal(harness({}, storage).api.prefs.getSnapshot().pinned, true, 'pinning is remembered on reload');
+});
+
+test('drag positions persist independently of pin state and reject invalid coordinates', () => {
+  const storage = memoryStorage();
+  const { api } = harness({}, storage);
+  api.setPosition({ left: 123.5, top: 80 });
+  assert.deepEqual(plain(harness({}, storage).api.prefs.getSnapshot().position), { left: 123.5, top: 80 });
+  assert.equal(api.prefs.getSnapshot().pinned, true);
+  api.close();
+  assert.deepEqual(plain(api.prefs.getSnapshot().position), { left: 123.5, top: 80 });
+  api.setPosition(null);
+  assert.equal(harness({}, storage).api.prefs.getSnapshot().position, null);
+  for (const position of [{ left: NaN, top: 1 }, { left: 1, top: Infinity }, { left: '3', top: 4 }, [], null]) {
+    assert.equal(sanitizePrefs({ position }).position, null);
+  }
+});
+
+test('card placement keeps dragged, anchored and resized cards inside the viewport', () => {
+  const anchor = { right: 1000, top: 60, width: 340, maxHeight: 600 };
+  assert.deepEqual(plain(cardPlacement(anchor, null, { width: 1200, height: 900 }, 400)), { left: 660, top: 60, width: 340, maxHeight: 600 });
+  for (const viewport of [{ width: 1200, height: 900 }, { width: 300, height: 200 }, { width: 180, height: 120 }]) {
+    for (const position of [null, { left: -500, top: -200 }, { left: 9000, top: 9000 }]) {
+      for (const height of [100, 600, 1000]) {
+        const box = cardPlacement(anchor, position, viewport, height);
+        assert.ok(box.left >= 12 && box.top >= 12);
+        assert.ok(box.left + box.width <= viewport.width - 12);
+        assert.ok(box.top + Math.min(height, box.maxHeight) <= viewport.height - 12);
+      }
+    }
+  }
 });

@@ -80,7 +80,7 @@ try {
     .replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&#39;', "'").replaceAll('&amp;', '&');
   fs.writeFileSync(path.join(out, 'selftest.txt'), report);
   console.log(report);
-  if (!report.trim()) process.exitCode = 1;
+  if (!report.trim() || /^(FAIL|ERRORS)\b/m.test(report)) process.exitCode = 1;
 } finally {
   fs.rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }

@@ -40,6 +40,8 @@ window.__ModuleLoader__.load({
       'pin': '固定摘要',
       'unpin': '取消固定',
       'pin.hint': '已固定：切换会话或刷新页面后仍会显示',
+      'drag.hint': '拖动以移动摘要；聚焦后用方向键移动，Home 恢复位置',
+      'position.reset': '恢复默认位置',
       'more': '更多操作',
       'close': '关闭',
       'copyPath': '复制项目路径',
@@ -136,6 +138,8 @@ window.__ModuleLoader__.load({
       'pin': 'Pin summary',
       'unpin': 'Unpin',
       'pin.hint': 'Pinned: stays open across session switches and reloads',
+      'drag.hint': 'Drag to move summary; use arrow keys when focused, Home to reset',
+      'position.reset': 'Reset position',
       'more': 'More actions',
       'close': 'Close',
       'copyPath': 'Copy project path',
@@ -588,10 +592,29 @@ window.__ModuleLoader__.load({
     function changesSummaryUrl(sessionId, seq) { return `api/changes.summary?${new URLSearchParams({ sessionId, seq: String(seq) })}` }
 
     // ------------------------------------------------------- stores / caches
+    function sanitizePosition(value) {
+      return isRecord(value) && Number.isFinite(value.left) && Number.isFinite(value.top)
+        ? { left: value.left, top: value.top } : null
+    }
     function sanitizePrefs(value) {
       const collapsed = {}
       if (isRecord(value?.collapsed)) for (const id of SECTION_IDS) if (value.collapsed[id] === true) collapsed[id] = true
-      return { pinned: value?.pinned === true, collapsed }
+      // Missing preferences opt into the new default; an explicit close/unpin wins.
+      return { pinned: value?.pinned !== false, collapsed, position: sanitizePosition(value?.position) }
+    }
+    /** Viewport coordinates, independent of the overlay's containing block. */
+    function cardPlacement(anchor, position, viewport, measuredHeight) {
+      const margin = 12
+      const width = Math.max(1, Math.min(anchor.width, viewport.width - margin * 2))
+      const maxHeight = Math.max(1, Math.min(anchor.maxHeight, viewport.height - margin * 2))
+      const height = Math.min(measuredHeight ?? maxHeight, maxHeight)
+      const left = position?.left ?? anchor.right - width
+      const top = position?.top ?? anchor.top
+      return {
+        left: clamp(left, margin, Math.max(margin, viewport.width - width - margin)),
+        top: clamp(top, margin, Math.max(margin, viewport.height - height - margin)),
+        width, maxHeight
+      }
     }
     function createStore(initial, { storage, key, sanitize = (value) => value } = {}) {
       let state = initial
@@ -675,6 +698,9 @@ window.__ModuleLoader__.load({
 .dss-head{flex:none;display:flex;align-items:center;gap:2px;padding:10px 8px 6px 14px;position:relative}
 .dss-project{flex:1;min-width:0;display:flex;align-items:center;gap:7px;margin-right:4px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;font-weight:600;border-radius:var(--dsw-radius-xs)}
 .dss-project svg{flex:none;color:var(--dsw-alias-label-secondary)}
+.dss-project[data-dss-drag-handle]{cursor:grab;touch-action:none;user-select:none}
+.dss-card[data-dragging] .dss-project{cursor:grabbing}
+.dss-project:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
 .dss-project-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dss-icon-btn{box-sizing:border-box;width:24px;height:24px;padding:0;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;font:inherit}
 .dss-icon-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
@@ -887,7 +913,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
     function knownKey(t, key, fallback) { return ZH[key] !== undefined ? t(key) : fallback }
 
     /** Pure view of one prepared model; every action arrives as a callback. */
-    function SummaryCard({ model, t, actions, prefs, expanded, onExpand, menuOpen, setMenuOpen, notice }) {
+    function SummaryCard({ model, t, actions, prefs, expanded, onExpand, menuOpen, setMenuOpen, notice, dragHandle }) {
       const collapsed = prefs.collapsed ?? {}
       const toggleSection = actions.toggleSection
       const sections = []
@@ -964,8 +990,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const projectTip = project.cwd ? (project.current && project.current !== project.cwd ? `${project.cwd}\n${t('project.cwd', { path: project.current })}` : project.cwd) : t('project.none')
       return h(React.Fragment, null,
         h('div', { className: 'dss-head' },
-          h(Tip, { label: projectTip },
-            h('div', { className: 'dss-project', tabIndex: 0, 'aria-label': project.cwd || t('project.none') }, h(Icon, { name: 'folder', size: 16 }), h('span', { className: 'dss-project-name' }, project.name || t('project.none')))),
+          h(Tip, { label: `${projectTip}\n${t('drag.hint')}` },
+            h('div', { className: 'dss-project', tabIndex: 0, 'aria-label': `${project.cwd || t('project.none')}. ${t('drag.hint')}`, 'data-dss-drag-handle': '', ...dragHandle }, h(Icon, { name: 'folder', size: 16 }), h('span', { className: 'dss-project-name' }, project.name || t('project.none')))),
           h(Tip, { label: t(prefs.pinned ? 'unpin' : 'pin') },
             h('button', { type: 'button', className: 'dss-icon-btn', 'aria-pressed': prefs.pinned, 'aria-label': t(prefs.pinned ? 'unpin' : 'pin'), 'data-dss-pin': '', onClick: actions.togglePin }, h(Icon, { name: prefs.pinned ? 'pinFill' : 'pin', size: 14 }))),
           h(Tip, { label: t('more') },
@@ -975,7 +1001,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
           menuOpen ? h('ul', { className: 'dss-menu', role: 'group', 'aria-label': t('more') },
             h('li', null, h('button', { type: 'button', disabled: !project.cwd, onClick: () => { setMenuOpen(false); actions.copyPath() } }, h(Icon, { name: 'copy', size: 14 }), t('copyPath'))),
             h('li', null, h('button', { type: 'button', disabled: !actions.canOpenFilesTab(), onClick: () => { setMenuOpen(false); actions.openFilesTab() } }, h(Icon, { name: 'tree', size: 14 }), t('openFiles'))),
-            h('li', null, h('button', { type: 'button', onClick: () => { setMenuOpen(false); actions.refresh() } }, h(Icon, { name: 'refresh', size: 14 }), t('refresh')))) : null),
+            h('li', null, h('button', { type: 'button', onClick: () => { setMenuOpen(false); actions.refresh() } }, h(Icon, { name: 'refresh', size: 14 }), t('refresh'))),
+            h('li', null, h('button', { type: 'button', onClick: () => { setMenuOpen(false); actions.resetPosition() } }, h(Icon, { name: 'refresh', size: 14 }), t('position.reset')))) : null),
         notice ? h('div', { className: 'dss-notice', role: 'status' }, notice) : null,
         h('div', { className: 'dss-body', onPointerDown: menuOpen ? () => setMenuOpen(false) : undefined }, sections,
           model.partial ? h('div', { className: 'dss-note' }, t('partial'), h('button', { type: 'button', className: 'dss-link', disabled: model.loadingOlder, onClick: actions.loadOlder }, t(model.loadingOlder ? 'loadingOlder' : 'loadOlder'))) : null))
@@ -1123,7 +1150,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
             h('button', { ref: buttonRef, type: 'button', className: 'dss-toggle', 'aria-label': label, 'aria-expanded': open, 'aria-controls': open ? CARD_ID : undefined, onClick },
               h(Icon, { name: 'list', size: 16 }),
               busy && !open ? h('span', { className: 'dss-toggle-badge', 'aria-hidden': true }) : null)),
-          open ? h(SummaryData, { ...props, anchorElement }) : null))
+          open ? h(SummaryData, { ...props, key: sessionId, anchorElement }) : null))
     }
 
     // ---------------------------------------------------- frame overlay side
@@ -1138,14 +1165,84 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const [offset, setOffset] = React.useState({ x: 0, y: 0 })
       const close = React.useCallback(() => api.close(), [api])
 
-      // Position is fixed in viewport space; correct once if a containing block shifts it.
+      const [viewport, setViewport] = React.useState(() => ({ width: window.innerWidth, height: window.innerHeight }))
+      const [measuredHeight, setMeasuredHeight] = React.useState(null)
+      const [dragPosition, setDragPosition] = React.useState(null)
+      const dragRef = React.useRef(null)
+      const placement = anchor ? cardPlacement(anchor, dragPosition ?? prefs.position, viewport, measuredHeight) : null
+      React.useLayoutEffect(() => {
+        const resize = () => setViewport({ width: window.innerWidth, height: window.innerHeight })
+        const measure = () => { if (cardRef.current) setMeasuredHeight(cardRef.current.getBoundingClientRect().height) }
+        measure()
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null
+        if (cardRef.current) observer?.observe(cardRef.current)
+        window.addEventListener('resize', resize)
+        return () => { observer?.disconnect(); window.removeEventListener('resize', resize) }
+      }, [])
+      // Keep containing-block compensation separate from the user's viewport position.
       React.useLayoutEffect(() => {
         const element = cardRef.current
-        if (!element || !anchor) return
+        if (!element || !placement) return
         const rect = element.getBoundingClientRect()
-        const dx = anchor.right - rect.right, dy = anchor.top - rect.top
+        const dx = placement.left - rect.left, dy = placement.top - rect.top
         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) setOffset((current) => ({ x: current.x + dx, y: current.y + dy }))
-      }, [anchor])
+      }, [anchor, viewport, placement?.left, placement?.top, placement?.width, placement?.maxHeight])
+      React.useEffect(() => () => dragRef.current?.cleanup(), [])
+      const dragHandle = {
+        onPointerDown(event) {
+          if (event.button !== 0 || event.isPrimary === false || dragRef.current || !placement) return
+          const element = event.currentTarget
+          const rect = cardRef.current.getBoundingClientRect()
+          const startX = event.clientX, startY = event.clientY
+          const pointerId = event.pointerId
+          const drag = { last: null, cleanup: null }
+          const move = (next) => {
+            if (next.pointerId !== pointerId) return
+            const dx = next.clientX - startX, dy = next.clientY - startY
+            if (!drag.last && Math.hypot(dx, dy) < 3) return
+            const box = cardPlacement(anchor, { left: rect.left + dx, top: rect.top + dy }, { width: window.innerWidth, height: window.innerHeight }, rect.height)
+            drag.last = { left: box.left, top: box.top }
+            setDragPosition(drag.last)
+          }
+          const finish = (next) => {
+            if (next.pointerId !== undefined && next.pointerId !== pointerId) return
+            if (next.type === 'pointerup') move(next)
+            drag.cleanup()
+            if (drag.last && next.type !== 'pointercancel') api.setPosition(drag.last)
+            setDragPosition(null)
+          }
+          drag.cleanup = () => {
+            window.removeEventListener('pointermove', move)
+            window.removeEventListener('pointerup', finish)
+            window.removeEventListener('pointercancel', finish)
+            window.removeEventListener('blur', finish)
+            element.removeEventListener('lostpointercapture', finish)
+            dragRef.current = null
+            try { if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId) } catch { /* detached */ }
+          }
+          dragRef.current = drag
+          window.addEventListener('pointermove', move)
+          window.addEventListener('pointerup', finish)
+          window.addEventListener('pointercancel', finish)
+          window.addEventListener('blur', finish)
+          element.addEventListener('lostpointercapture', finish)
+          try { element.setPointerCapture(pointerId) } catch { /* window listeners also cover synthetic/unsupported capture */ }
+          setMenuOpen(false)
+          api.tip.set({ tip: null })
+          element.focus({ preventScroll: true })
+          event.preventDefault()
+        },
+        onKeyDown(event) {
+          if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing || dragRef.current) return
+          if (event.key === 'Home') { event.preventDefault(); api.setPosition(null); return }
+          const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key]
+          if (!direction || !placement) return
+          event.preventDefault()
+          const step = event.shiftKey ? 64 : 16
+          const box = cardPlacement(anchor, { left: placement.left + direction[0] * step, top: placement.top + direction[1] * step }, viewport, measuredHeight)
+          api.setPosition({ left: box.left, top: box.top })
+        }
+      }
       React.useEffect(() => {
         if (pinned) return
         const onPointerDown = (event) => {
@@ -1188,6 +1285,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         return {
           close,
           togglePin: () => api.togglePin(sessionId),
+          resetPosition: () => api.setPosition(null),
           toggleSection: api.toggleSection,
           openChange: (file) => guard(() => api.openResource(changesReviewAddress(sessionId, file.latest.seq, file.latest.turn), { params: { index: file.latest.index } })),
           retryChanges: () => api.summaries.retry(sessionId),
@@ -1205,11 +1303,11 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         }
       }, [api, sessionId, cwd, context, close, t])
 
-      const style = anchor
-        ? { top: anchor.top + offset.y, left: anchor.right - anchor.width + offset.x, width: anchor.width, maxHeight: anchor.maxHeight }
+      const style = placement
+        ? { ...placement, top: placement.top + offset.y, left: placement.left + offset.x }
         : { visibility: 'hidden', top: 0, left: 0 }
-      return h('section', { id: CARD_ID, ref: cardRef, className: 'dss-card', role: 'dialog', 'aria-label': t('card.aria'), 'data-dsh-session-summary': sessionId, 'data-pinned': pinned ? '' : undefined, style },
-        h(SummaryCard, { model, t, actions, prefs, expanded, onExpand: (id) => setExpanded((current) => ({ ...current, [id]: !current[id] })), menuOpen, setMenuOpen, notice }))
+      return h('section', { id: CARD_ID, ref: cardRef, className: 'dss-card', role: 'dialog', 'aria-label': t('card.aria'), 'data-dsh-session-summary': sessionId, 'data-pinned': pinned ? '' : undefined, 'data-dragging': dragPosition ? '' : undefined, style },
+        h(SummaryCard, { model, t, actions, prefs, expanded, onExpand: (id) => setExpanded((current) => ({ ...current, [id]: !current[id] })), menuOpen, setMenuOpen, notice, dragHandle }))
     }
     function SummaryOverlay({ api, t }) {
       const view = useStore(api.view, selectView)
@@ -1247,6 +1345,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const tabs = () => service('sidebarRightTabs')
       return {
         prefs, ui, view, tip, summaries, service,
+        setPosition(position) { prefs.set({ position: sanitizePosition(position) }) },
         open(sessionId) { ui.set({ openSession: sessionId }) },
         close() { prefs.set({ pinned: false }); ui.set({ openSession: null }) },
         togglePin(sessionId) {
@@ -1355,7 +1454,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       // Pure helpers exported for the package's own tests.
       deriveChat, aggregateChanges, deriveSubagents, deriveRelated, deriveJobs, deriveTodos, planModeActive, fileReferences, parseMcpName, callInfo,
       fileAddressFor, changesReviewAddress, subagentChatAddress, planAddress, changesSummaryUrl, formatDuration, formatTokens, basename, hostOf, displayPath,
-      createStore, sanitizePrefs, createSummaryCache, createApi, SummaryCard, SummaryCardHost, SummaryOverlay, SummaryToggle, SummaryData, ApiContext,
+      createStore, sanitizePrefs, sanitizePosition, cardPlacement, createSummaryCache, createApi, SummaryCard, SummaryCardHost, SummaryOverlay, SummaryToggle, SummaryData, ApiContext,
       HOST_ICONS, ZH, EN, CSS, SLOT, ENTRY_ID, OVERLAY_SLOT, OVERLAY_ID, STORAGE_KEY, SECTION_IDS
     }
   }

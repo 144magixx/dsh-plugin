@@ -11,7 +11,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const archive = path.resolve(process.argv[2] ?? path.join(root, 'artifacts', 'dsh-session-summary-0.1.0.tgz'));
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const archive = path.resolve(process.argv[2] ?? path.join(root, 'artifacts', `${manifest.name}-${manifest.version}.tgz`));
 if (path.dirname(archive) !== path.join(root, 'artifacts')) throw new Error('Only inspect this workspace artifact directory');
 const tar = zlib.gunzipSync(fs.readFileSync(archive));
 const required = new Set(['package.json', 'cordis.patch.yml', 'lib/index.js', 'lib/client.js', 'locale/en.json', 'locale/zh.json', 'icon.svg', 'README.md', 'LICENSE']);
@@ -42,7 +43,7 @@ for (let offset = 0; offset + 512 <= tar.length;) {
   if (relative === 'package.json') {
     const actual = JSON.parse(body.toString('utf8'));
     if (JSON.stringify(actual) !== JSON.stringify(JSON.parse(expected.toString('utf8')))) throw new Error('Packed manifest differs');
-    if (actual.name !== 'dsh-session-summary' || actual.version !== '0.1.0') throw new Error('Unexpected package identity');
+    if (actual.name !== 'dsh-session-summary' || actual.version !== manifest.version) throw new Error('Unexpected package identity');
     if (actual.dependencies || actual.peerDependencies) throw new Error('Runtime dependencies are not allowed');
     for (const script of ['preinstall', 'install', 'postinstall', 'prepare']) if (actual.scripts?.[script]) throw new Error(`Install script present: ${script}`);
   } else if (!body.equals(expected)) throw new Error(`Archive differs from source: ${relative}`);
