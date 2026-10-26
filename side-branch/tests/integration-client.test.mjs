@@ -39,7 +39,11 @@ test('installed ClientModuleSystem mounts plugin with real React, slots and nati
       main: { kind: 'keyed', scope: 'root' },
       'sidebar.right.pane.tab': { kind: 'keyed', scope: 'session' },
       'conversation.chat.assistant-actions': { kind: 'list', scope: 'session' },
+      'conversation.chat.node': { kind: 'keyed', scope: 'session' },
     } }, () => null);
+    const NativeUser = React.memo(() => null);
+    ctx.slots.register({ name: 'conversation.chat.node', key: 'user', locale: 'chat' }, NativeUser);
+    const nativeUser = ctx.slots.entriesOfSlot('conversation.chat.node').find(entry => entry.options.key === 'user');
     await mount('dsh-client-ui-conversation');
     // Declare sibling before Side Branch to prove slot contributions coexist.
     ctx.slots.register({ name: 'sidebar.right.pane.tab', key: 'existing-side-chat' }, () => null);
@@ -53,6 +57,11 @@ test('installed ClientModuleSystem mounts plugin with real React, slots and nati
     assert.equal(providers.length, 1);
     assert.deepEqual([...ctx.slots.entries('sidebar.right.pane.tab')].map(e => e.options.key).sort(), ['dsh-side-branch', 'existing-side-chat']);
     assert.equal(ctx.slots.entries('conversation.chat.assistant-actions').filter(e => e.options.id === 'dsh-side-branch').length, 1);
+    const user = ctx.slots.entriesOfSlot('conversation.chat.node').find(entry => entry.options.key === 'user');
+    assert.notEqual(user.component, NativeUser, 'plugin shadows the native user cell');
+    assert.equal(user.options.priority, -1, 'lower priority wins over native default zero');
+    assert.equal(user.locale, nativeUser.locale, 'native locale kit survives replacement');
+    assert.ok(ctx.slots.entries('conversation.chat.node').includes(nativeUser), 'native registration remains live');
     assert.equal(ctx.slots.spec('side-branch.conversation').scope, 'session');
     assert.equal(ctx.slots.entries('side-branch.conversation').length, 1);
     assert.ok(ctx.slots.snapshot('factory:conversation.content').length > 0);
@@ -74,6 +83,8 @@ test('installed ClientModuleSystem mounts plugin with real React, slots and nati
     shell.actions.setDraft('User revised the question');
     ctx.conversation.input.requestDraftInitialization(binding, { prompt: 'Complete historical question' });
     assert.equal(shell.snapshot.draft, 'User revised the question', 'repeated initialization preserves user edits');
+    await fiber.dispose();
+    assert.equal(ctx.slots.entriesOfSlot('conversation.chat.node').find(entry => entry.options.key === 'user'), nativeUser, 'unload restores the native user cell');
   } finally {
     for (const fiber of fibers.toReversed()) await fiber.dispose();
     await ctx.fiber.dispose();

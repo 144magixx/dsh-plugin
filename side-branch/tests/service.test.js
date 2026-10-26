@@ -57,6 +57,21 @@ test('native creation is idempotent and fenced until configured; no source write
   assert.equal((await f.service.guard({ agent: { id: 'unrelated' } }, () => ({ kind: 'enter', extra: 42 }))).extra, 42);
   await f.service.create(request); assert.equal(f.calls.fork, 1);
 });
+test('user message entry creates a branch from the preceding boundary and prefills that prompt', async () => {
+  const f = fixture(); const before = structuredClone(f.source.events);
+  const userRequest = { sourceSessionId: 'source', mode: 'edit', messageId: 'q2', requestId: 'user-entry' };
+  const { branch } = await f.service.create(userRequest);
+  assert.equal(branch.turn, 2);
+  assert.equal(branch.originalPrompt, 'wrong question');
+  assert.equal(f.calls.fork, 1);
+  const child = f.sessions.get(branch.sessionId);
+  const inherited = child.events.slice(0, child.inheritedEventCount);
+  assert.ok(inherited.some(e => e.data.id === 'q1'));
+  assert.ok(!inherited.some(e => e.data.id === 'q2' || e.data.message?.id === 'a2'));
+  assert.deepEqual(f.source.events, before);
+  assert.equal((await f.service.create(userRequest)).branch.sessionId, branch.sessionId);
+  assert.equal(f.calls.fork, 1);
+});
 test('same request id cannot adopt different source or anchor', async () => {
   const f = fixture(); await f.service.create(request);
   await assert.rejects(f.service.create({ ...request, turn: 1 }), e => e.code === 'request-conflict');

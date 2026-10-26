@@ -55,6 +55,22 @@ test('per-turn eligibility reproduces native footer gating without folding event
   assert.equal(eligible({ completed: true, editable: true }, 'edit'), true)
 })
 
+test('user message eligibility follows its exact initial prompt without needing a final answer', () => {
+  const node = { kind: 'user', id: 'q2', data: { seq: 4, source: { kind: 'user' } }, location: { kind: 'step', turn: { turn: 2 } } };
+  const later = { ...node, id: 'later', data: { ...node.data, seq: 6 } };
+  const snapshot = (ended) => ({ timeline: { turns: new Map([[2, ended ? { end: { seq: 10 } } : {}]]) }, locations: { getTurn: () => ['later', 'q2'] }, nodes: new Map([['q2', node], ['later', later]]) });
+  const ready = snapshot(true);
+  assert.equal(client.nativeUserTurnState(ready, node), '2:ready');
+  assert.equal(client.nativeUserTurnState(snapshot(false), node), '2:blocked');
+  assert.equal(client.nativeUserTurnState(ready, later), '');
+  assert.equal(client.nativeUserTurnState({}, node), '');
+  assert.equal(client.nativeUserTurnState(ready, { ...node, kind: 'steering' }), '');
+  assert.equal(client.nativeUserTurnState(ready, { ...node, data: { source: { kind: 'runtime-context' } } }), '');
+  assert.equal(client.nativeUserTurnState(ready, { ...node, id: undefined }), '');
+  assert.equal(client.nativeUserTurnState(ready, { ...node, location: { kind: 'root' } }), '');
+  assert.equal(client.nativeUserTurnState(ready, { ...node, location: { kind: 'turn', turn: { turn: 0 } } }), '');
+  assert.equal(client.nativeUserTurnState({ ...ready, timeline: undefined }, { ...node, location: { kind: 'turn', turn: { turn: 2, end: { seq: 10 } } } }), '2:ready');
+});
 test('all footer selectors share one traversal per immutable Chat snapshot', () => {
   const snapshot = chat()
   let traversals = 0
@@ -199,7 +215,7 @@ test('explicitly resolved close does not invoke native cleanup twice', async () 
   assert.equal(calls, 1)
 })
 
-function resourceHarness({ ownUserMessages = 0, hasPendingHumanInput = false, initializeResult = 'applied', failReady = false } = {}) {
+function resourceHarness({ ownUserMessages = 0, hasPendingHumanInput = false, initializeResult = 'applied', failReady = false, resourceBranch = branch } = {}) {
   const calls = []
   const binding = { sessionId: branch.sessionId }
   const reference = { binding, ready: failReady ? Promise.reject(new Error('open failed')) : Promise.resolve(binding), release() { calls.push(['release']) } }
@@ -207,7 +223,7 @@ function resourceHarness({ ownUserMessages = 0, hasPendingHumanInput = false, in
     sessions: { retain(target, options) { calls.push(['retain', target, options]); return reference } },
     conversation: { input: { requestDraftInitialization(target, options) { calls.push(['draft', target, options]); return initializeResult } } },
   }
-  const api = async () => ({ branch, ownUserMessages, hasPendingHumanInput, running: false })
+  const api = async () => ({ branch: resourceBranch, ownUserMessages, hasPendingHumanInput, running: false })
   return { provider: branchResourceProvider(ctx, api), calls, reference, ctx }
 }
 test('native resource retains ordinary child id, initializes only its draft, then releases', async () => {
@@ -225,6 +241,18 @@ test('native resource retains ordinary child id, initializes only its draft, the
   controller.abort()
   await iterator.next()
   assert.equal(calls.at(-1)[0], 'release')
+})
+
+test('current-turn fork opens with no historical prompt draft', async () => {
+  const continued = { ...branch, mode: 'continue', intent: 'fork', originalPrompt: '', attachmentCount: 0 }
+  const { provider, calls } = resourceHarness({ resourceBranch: continued })
+  const controller = new AbortController()
+  const iterator = provider.open(branchAddress(continued), { signal: controller.signal })
+  const result = await iterator.next()
+  assert.equal(result.value.ok, true)
+  assert.equal(result.value.value.branch.mode, 'continue')
+  assert.equal(calls.some(([name]) => name === 'draft'), false)
+  controller.abort(); await iterator.next()
 })
 
 test('reopened branch with own messages never replays historical draft', async () => {

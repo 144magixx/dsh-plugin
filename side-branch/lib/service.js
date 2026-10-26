@@ -90,7 +90,9 @@ export class SideBranchService {
     this.checkCapabilities();
     // Deduplicate the click before any asynchronous I/O. Same key, changed input
     // is rejected rather than silently adopting another branch.
-    const fingerprint = JSON.stringify([args.sourceSessionId, args.mode, args.turn ?? null, args.messageId ?? null]);
+    const identity = [args.sourceSessionId, args.mode, args.turn ?? null, args.messageId ?? null];
+    if (args.expectedPromptMessageId !== undefined || args.intent !== undefined || args.editId !== undefined) identity.push(args.expectedPromptMessageId ?? null, args.intent ?? null, args.editId ?? null);
+    const fingerprint = JSON.stringify(identity);
     const ongoing = this.pending.get(args.requestId);
     if (ongoing) {
       if (ongoing.fingerprint !== fingerprint) fail('request-conflict', 'This request ID belongs to another branch request.');
@@ -186,7 +188,7 @@ export class SideBranchService {
         await workspace.attachSession(child.id);
         if (workspace.sessionIds.includes(record.sourceSessionId)) await workspace.insertSessionBefore(child.id, record.sourceSessionId);
       }
-      const suffix = record.mode === 'edit' ? `改第 ${record.turn} 轮` : `自第 ${record.turn} 轮`;
+      const suffix = record.intent === 'fork' && record.mode === 'continue' ? `自第 ${record.turn} 轮分叉` : record.intent === 'fork' ? `分叉第 ${record.turn} 轮提问` : record.mode === 'edit' ? `改第 ${record.turn} 轮` : `自第 ${record.turn} 轮`;
       await this.ctx.sessionController.rename({ sessionId: child.id, title: `${config.title || '会话'} · ${suffix}`.slice(0, 200) });
       if (await this.ctx.sessions.flush(child.session) === false) fail('persistence-unavailable', 'Native session persistence is required for sidebar branches.');
       // Keep the admission fence up while restoring archive state. A failure
