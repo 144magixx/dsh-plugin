@@ -69,6 +69,14 @@ window.__ModuleLoader__.load({
       modelHint: 'Initial model and permissions come from the source’s current settings; change them in the native composer', clearChoice: 'Clear remembered close choice'
     }
 
+    function BranchIcon({ size = 22, className }) {
+      return h('svg', { xmlns: 'http://www.w3.org/2000/svg', viewBox: '0 0 24 24', width: size, height: size, className, fill: 'none', stroke: '#608de6', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: 'false' },
+        h('path', { d: 'M6 6v12M6 12c0-5 12 0 12-6' }),
+        h('circle', { cx: 6, cy: 4, r: 2 }),
+        h('circle', { cx: 6, cy: 20, r: 2 }),
+        h('circle', { cx: 18, cy: 4, r: 2 }))
+    }
+
     function branchAddress(branch) {
       if (!branch || typeof branch.sessionId !== 'string' || !branch.sessionId || typeof branch.sourceSessionId !== 'string' || !branch.sourceSessionId || !['continue', 'edit'].includes(branch.mode) || !Number.isSafeInteger(branch.turn) || branch.turn < 1) throw new Error('Invalid branch address')
       const params = new URLSearchParams({ source: branch.sourceSessionId, mode: branch.mode, turn: String(branch.turn) })
@@ -601,7 +609,7 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.resources.register(branchResourceProvider(ctx, api)), '[side-branch] native resources')
       ctx.effect(() => ctx.sidebarRightTabs.register({ id: TYPE, kind: KIND, priority: 'extension', patterns: [`${PREFIX}**`], canOpen: (address) => parseBranchAddress(address) !== null,
         title: (address) => { const branch = parseBranchAddress(address); return branch ? t(branch.intent === 'fork' ? 'forkTitle' : branch.mode === 'edit' ? 'editTitle' : 'turnTitle', { turn: branch.turn }) : t('title') },
-        guide: [{ id: KIND, order: 20, title: () => t('title'), description: () => t('guide') }], keepMounted: true, multiple: true }), '[side-branch] tab type')
+        guide: [{ id: KIND, order: 20, icon: BranchIcon, title: () => t('title'), description: () => t('guide') }], keepMounted: true, multiple: true }), '[side-branch] tab type')
       ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: TYPE, locale: NS, children: { [SLOT]: { kind: 'single', scope: 'session' } }, inject: () => ({ runtime, t, nativeAvailable, openMain }) }, BranchBody)), '[side-branch] tab body')
       ctx.effect(() => ctx.slots.inject(SLOT, () => ctx.slots.register({ name: SLOT, locale: NS, inject: () => ({ runtime, t, openMain }) }, NativeConversation)), '[side-branch] child conversation')
       ctx.effect(() => ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({ name: 'conversation.chat.assistant-actions', id: TYPE, order: 40, locale: NS, inject: () => ({ runtime, t, nativeAvailable, openBranch, sidebarSessionId }) }, AssistantActions)), '[side-branch] per-turn actions')
