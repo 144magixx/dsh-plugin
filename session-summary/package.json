@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-summary",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Codex-style pinned session summary card for DSH: changes, subagents, sources, plan, generated files, background jobs and related sessions at the conversation's top-right.",
   "type": "module",
   "license": "MIT",

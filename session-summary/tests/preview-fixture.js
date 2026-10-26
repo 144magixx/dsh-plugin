@@ -109,14 +109,16 @@
     window.__summaryPreview.switchSession = setActiveSession
     const activeHooks = activeSession === sessionId ? hooks : { ...hooks, useChat: select => select(null), useProjection: () => null }
     return h('div', { className: 'pv-frame' },
-      h('div', { className: 'pv-column' },
+      h('div', { className: 'pv-column', 'data-phase': 'active' },
         h('header', { className: 'pv-header' },
           h('div', { className: 'pv-title' }, '评估并统一禁忌搜索结果'),
           h('div', { className: 'pv-utilities' }, h('span', { className: 'pv-native' }, '⋯'), h(client.SummaryToggle, { sessionId: activeSession, api, t, ...activeHooks })),
           h('div', { className: 'pv-corner' })),
-        h('div', { className: 'pv-transcript' },
+        h('div', { className: 'pv-content', 'data-conversation-content': '', 'data-conversation-session': activeSession },
+          h('div', { className: 'pv-transcript' },
           h('div', { className: 'pv-bubble' }, '评估一下纯禁忌搜索（非贪心+禁忌搜索）的指标和性能，把相关结果统一到项目所有文档（报告、ppt、网页等）有关的地方，并要标明纯禁忌搜索和贪心+禁忌搜索。'),
-          h('p', null, '这里是对话内容。卡片悬浮在对话上方，不占用对话宽度。'))),
+          h('p', null, '这里是会话正文。摘要停靠在独立空间中，正文与输入框完整可见。')),
+          h('div', { className: 'pv-composer', 'data-conversation-region': 'composer' }, '发送消息或创建任务…'))),
       h('div', { className: 'pv-overlay', 'data-shell-overlay': '' }, h('div', { 'data-slot': 'shell.overlay', style: { display: 'contents' } }, h(client.SummaryOverlay, { api, t }))))
   }
   const pluginStyle = document.createElement('style')
@@ -130,7 +132,9 @@
 .pv-utilities{display:flex;align-items:center;gap:8px}
 .pv-native{width:28px;text-align:center;color:var(--dsw-alias-label-secondary)}
 .pv-corner{width:28px;height:28px;margin-right:-16px;margin-left:8px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover)}
-.pv-transcript{flex:1;padding:40px 0;max-width:720px;margin:0 auto;font-size:14px;line-height:1.7;color:var(--dsw-alias-label-secondary)}
+.pv-content{display:flex;flex-direction:column;flex:1;min-height:0;overflow:auto}
+.pv-composer{box-sizing:border-box;flex:none;width:calc(100% - 32px);max-width:720px;margin:12px auto;padding:20px;border:1px solid var(--dsw-alias-border-l3);border-radius:16px;color:var(--dsw-alias-label-tertiary)}
+.pv-transcript{box-sizing:border-box;flex:1;padding:40px 0;width:calc(100% - 32px);max-width:720px;margin:0 auto;font-size:14px;line-height:1.7;color:var(--dsw-alias-label-secondary)}
 .pv-bubble{margin-left:auto;max-width:520px;padding:10px 14px;border-radius:16px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .pv-overlay{position:absolute;inset:0;z-index:20;pointer-events:none}.pv-overlay>*{pointer-events:auto}
 /* Headless virtual time freezes CSS animations at their first frame. */
@@ -147,6 +151,9 @@
     const card = () => document.querySelector('[data-dsh-session-summary]')
     await wait(700)
     check('card opens and pins by default', !!card() && api.prefs.getSnapshot().pinned === true)
+    check('only changes expanded by default', [...card().querySelectorAll('.dss-sec-head[aria-expanded=true]')].map(button => button.closest('[data-section]').dataset.section).join(',') === 'changes')
+    for (const button of card().querySelectorAll('.dss-sec-head[aria-expanded=false]')) button.click()
+    await wait(80)
     const text = card()?.textContent ?? ''
     check('project name', text.includes('paper'))
     check('changes merged', text.includes('+517') && text.includes('−6'), text.match(/[+−]\d+/g)?.slice(0, 4).join(' '))

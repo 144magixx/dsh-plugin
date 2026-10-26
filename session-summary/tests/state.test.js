@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { client } from './client-core.mjs';
 
-const { createStore, sanitizePrefs, createSummaryCache, createApi, cardPlacement, STORAGE_KEY } = client;
+const { createStore, sanitizePrefs, createSummaryCache, createApi, cardPlacement, summaryLayout, STORAGE_KEY } = client;
+const defaultCollapsed = { subagents: true, sources: true, plan: true, files: true, jobs: true, related: true };
 const plain = value => JSON.parse(JSON.stringify(value));
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -11,17 +12,17 @@ function memoryStorage(initial = {}) {
   return { getItem: key => (map.has(key) ? map.get(key) : null), setItem: (key, value) => { map.set(key, String(value)); }, map };
 }
 
-test('preferences persist pinned state and only known collapsed sections', () => {
+test('window defaults replace old saved UI state while only position persists', () => {
   const storage = memoryStorage({ [STORAGE_KEY]: JSON.stringify({ pinned: true, collapsed: { sources: true, bogus: true, jobs: false }, extra: 1 }) });
-  const prefs = createStore(sanitizePrefs({}), { storage, key: STORAGE_KEY, sanitize: sanitizePrefs });
-  assert.deepEqual(plain(prefs.getSnapshot()), { pinned: true, collapsed: { sources: true }, position: null });
+  const { prefs } = harness({}, storage).api;
+  assert.deepEqual(plain(prefs.getSnapshot()), { pinned: true, collapsed: defaultCollapsed, floating: false, position: null });
   let notified = 0;
   prefs.subscribe(() => { notified++; });
   prefs.set({ pinned: true });
   assert.equal(notified, 0, 'unchanged values do not notify');
   prefs.set({ pinned: false });
   assert.equal(notified, 1);
-  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)), { pinned: false, collapsed: { sources: true }, position: null });
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)), { position: null });
   const broken = createStore(sanitizePrefs({}), { storage: memoryStorage({ [STORAGE_KEY]: '{not json' }), key: STORAGE_KEY, sanitize: sanitizePrefs });
   assert.equal(broken.getSnapshot().pinned, true);
   const failing = createStore({ a: 1 }, { storage: { getItem: () => null, setItem: () => { throw new Error('quota'); } }, key: 'k' });
@@ -94,9 +95,9 @@ test('open, close, pin and session ownership follow the Codex pinned-summary mod
   api.close();
   assert.deepEqual([api.prefs.getSnapshot().pinned, api.ui.getSnapshot().openSession], [false, null], 'close also unpins');
   api.toggleSection('sources'); api.toggleSection('bogus');
-  assert.deepEqual(plain(api.prefs.getSnapshot().collapsed), { sources: true });
+  assert.deepEqual(plain(api.prefs.getSnapshot().collapsed), { subagents: true, plan: true, files: true, jobs: true, related: true });
   api.toggleSection('sources');
-  assert.deepEqual(plain(api.prefs.getSnapshot().collapsed), {});
+  assert.deepEqual(plain(api.prefs.getSnapshot().collapsed), defaultCollapsed);
 });
 
 test('published view keeps model and anchor per session and ignores stale unpublish', () => {
@@ -172,7 +173,7 @@ test('navigation uses native services and degrades without them', async () => {
 });
 
 
-test('defaults respect saved choices and survive missing, corrupt or unavailable storage', () => {
+test('each new window opens pinned with only changes expanded even after closing', () => {
   for (const value of [null, '{broken', '{}', 'null', '{"pinned":"false"}', '{"collapsed":{"sources":true}}']) {
     const storage = memoryStorage(value === null ? {} : { [STORAGE_KEY]: value });
     assert.equal(harness({}, storage).api.prefs.getSnapshot().pinned, true);
@@ -182,13 +183,18 @@ test('defaults respect saved choices and survive missing, corrupt or unavailable
   for (const pinned of [true, false]) {
     const storage = memoryStorage({ [STORAGE_KEY]: JSON.stringify({ pinned, collapsed: { jobs: true } }) });
     const { api } = harness({}, storage);
-    assert.equal(api.prefs.getSnapshot().pinned, pinned);
-    assert.deepEqual(plain(api.prefs.getSnapshot().collapsed), { jobs: true });
+    assert.equal(api.prefs.getSnapshot().pinned, true);
+    assert.deepEqual(plain(api.prefs.getSnapshot().collapsed), defaultCollapsed);
   }
   const storage = memoryStorage();
   const { api } = harness({}, storage);
+  api.toggleSection('sources');
+  api.toggleSection('changes');
   api.close();
-  assert.equal(harness({}, storage).api.prefs.getSnapshot().pinned, false, 'closing is remembered on reload');
+  assert.equal(api.prefs.getSnapshot().pinned, false, 'close stays effective inside this window');
+  const nextWindow = harness({}, storage).api;
+  assert.equal(nextWindow.prefs.getSnapshot().pinned, true, 'a new window opens pinned again');
+  assert.deepEqual(plain(nextWindow.prefs.getSnapshot().collapsed), defaultCollapsed);
   api.open('a');
   api.togglePin('a');
   assert.equal(harness({}, storage).api.prefs.getSnapshot().pinned, true, 'pinning is remembered on reload');
@@ -222,4 +228,29 @@ test('card placement keeps dragged, anchored and resized cards inside the viewpo
       }
     }
   }
+});
+
+
+test('default layout reserves a side column or a narrow-window summary row', () => {
+  const viewport = { width: 1440, height: 900 };
+  const side = summaryLayout({ width: 1200, right: 1440, bottom: 76 }, viewport, false);
+  assert.equal(side.layout, 'side');
+  assert.equal(side.width, 320);
+  const tinyViewport = { width: 760, height: 120 };
+  const tinyAnchor = summaryLayout({ width: 760, right: 760, bottom: 76 }, tinyViewport, false);
+  const tiny = cardPlacement(tinyAnchor, null, tinyViewport, 40);
+  assert.ok(tiny.top >= 76, 'docked summary must not move over the header');
+  assert.ok(tiny.top + tiny.maxHeight <= 108, 'docked height uses the real remaining space');
+  const stack = summaryLayout({ width: 760, right: 1000, bottom: 76 }, viewport, false);
+  assert.equal(stack.layout, 'stack');
+  assert.ok(stack.width <= 760 - 24);
+  assert.ok(stack.maxHeight <= viewport.height * 0.45);
+  assert.equal(summaryLayout({ width: 1200, right: 1440, bottom: 76 }, viewport, true).layout, 'floating');
+  const storage = memoryStorage();
+  const { api } = harness({}, storage);
+  api.setPosition({ left: 500, top: 150 });
+  assert.equal(api.prefs.getSnapshot().floating, true, 'manual drag detaches the card in this window');
+  assert.equal(harness({}, storage).api.prefs.getSnapshot().floating, false, 'a new window always starts docked');
+  api.setPosition(null);
+  assert.equal(api.prefs.getSnapshot().floating, false, 'reset docks the card again');
 });
