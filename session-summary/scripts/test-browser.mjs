@@ -21,7 +21,7 @@ const browser = (flag >= 0 ? process.argv[flag + 1] : undefined) ?? process.env.
 ].filter(Boolean).find(file => fs.existsSync(file));
 if (!browser) throw new Error('Set CHROME_PATH or pass --browser to Chrome/Chromium/Edge.');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'dss-browser-test-'));
-const child = spawn(browser, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-extensions', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+const child = spawn(browser, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-extensions', '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
 const exited = once(child, 'exit');
 let socket;
 const errors = [];
@@ -72,8 +72,9 @@ try {
   };
   const settle = () => evaluate('new Promise(resolve => setTimeout(resolve, 80))');
   const waitFor = async expression => {
-    for (let i = 0; i < 60; i++) { if (await evaluate(expression)) return; await pause(50); }
-    throw new Error(`Condition timed out: ${expression}`);
+    for (let i = 0; i < 120; i++) { if (await evaluate(expression)) return; await pause(50); }
+    const diagnostic = await evaluate('JSON.stringify({url:location.href,ready:document.readyState,visibility:document.visibilityState,report:document.getElementById("selftest")?.textContent})');
+    throw new Error(`Condition timed out: ${expression} :: ${diagnostic}`);
   };
   const resize = async (width, height) => { await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); await settle(); };
   await resize(1200, 900);
@@ -103,8 +104,41 @@ try {
     await settle();
     return { x: x + dx, y: y + dy };
   }
+  const expandedSections = () => evaluate(`[...document.querySelectorAll('.dss-sec-head[aria-expanded=true]')].map(button => button.closest('[data-section]').dataset.section)`);
+  const checkBackground = async theme => {
+    const result = await evaluate(`(() => {
+      const card = ${card};
+      const actual = getComputedStyle(card).backgroundColor;
+      card.style.background = 'var(--dsw-specific-menu)';
+      const native = getComputedStyle(card).backgroundColor;
+      card.style.removeProperty('background');
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      const alpha = color => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = color; ctx.fillRect(0, 0, 1, 1); return ctx.getImageData(0, 0, 1, 1).data[3]; };
+      return { actual: alpha(actual), native: alpha(native), opacity: getComputedStyle(card).opacity };
+    })()`);
+    check(`${theme} background is slightly translucent without fading contents`, Math.abs(result.actual - result.native * 0.88) < 2 && result.opacity === '1');
+    const image = await call('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(workspace, `tests/.integration-data/preview/card-default-${theme}.png`), Buffer.from(image.data, 'base64'));
+  };
   const initial = await box();
   check('fresh card opens and pins without clicking', (await prefs()).pinned && initial.width > 0);
+  check('only changes is expanded on startup', JSON.stringify(await expandedSections()) === '["changes"]');
+  check('docked summary leaves transcript and composer unobstructed', (await box('[data-conversation-content]')).right <= initial.left - 10 && (await box('[data-conversation-region="composer"]')).right < initial.left);
+  await checkBackground('light');
+  await evaluate("document.body.setAttribute('data-ds-dark-theme', '')"); await settle();
+  await checkBackground('dark');
+  await evaluate("document.body.removeAttribute('data-ds-dark-theme')"); await settle();
+  await resize(760, 900);
+  check('narrow window uses a compact summary row above conversation', (await box()).height < 64 && (await box('[data-conversation-content]')).top >= (await box()).bottom + 10);
+  await click('[data-dss-more]');
+  check('compact summary menu is visible inside the card', (await box('.dss-menu')).bottom <= (await box()).bottom && (await box('[data-conversation-content]')).top >= (await box()).bottom + 10);
+  await click('.dss-menu li:first-child button');
+  await click('[data-dss-compact]');
+  check('expanding narrow summary reserves vertical space', (await box()).height > 100 && (await box('[data-conversation-content]')).top >= (await box()).bottom + 10);
+  const narrowShot = await call('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(workspace, 'tests/.integration-data/preview/card-narrow.png'), Buffer.from(narrowShot.data, 'base64'));
+  await resize(1200, 900);
   await drag(-220, 90);
   const moved = await box();
   check('real mouse drag follows pointer', Math.abs(moved.left - initial.left + 220) < 2 && Math.abs(moved.top - initial.top - 90) < 2);
@@ -113,7 +147,8 @@ try {
   fs.writeFileSync(path.join(workspace, 'tests/.integration-data/preview/card-dragged.png'), Buffer.from(screenshot.data, 'base64'));
   const saved = (await prefs()).position;
   await call('Page.reload'); await waitFor('!!window.__summaryPreview && !!document.querySelector("[data-dsh-session-summary]")'); await settle();
-  check('position and pin survive reload', (await prefs()).pinned && Math.abs((await box()).left - saved.left) < 2);
+  check('reload returns to a safe docked layout', (await prefs()).pinned && !(await prefs()).floating && Math.abs((await box()).left - initial.left) < 2);
+  await evaluate(`${api}.setPosition(${JSON.stringify(saved)})`); await settle();
   await evaluate('window.__summaryPreview.switchSession("sess-other")'); await settle();
   check('switching session keeps position and replaces old content', Math.abs((await box()).left - saved.left) < 2 && await evaluate(`${card}.dataset.dshSessionSummary === 'sess-other' && !${card}.textContent.includes('Wikipedia')`));
   await evaluate('window.__summaryPreview.switchSession("sess-paper")'); await settle();
@@ -122,7 +157,7 @@ try {
   check('small viewport keeps entire card reachable', small.left >= 11 && small.top >= 11 && small.right <= 269 && small.bottom <= 179);
   await resize(1200, 900);
   await click('[data-dss-more]');
-  await evaluate(`[...document.querySelectorAll('.dss-menu button')].find(button => button.textContent.includes('恢复默认位置')).click()`); await settle();
+  await evaluate(`[...document.querySelectorAll('.dss-menu button')].find(button => button.textContent.includes('靠边显示')).click()`); await settle();
   check('reset menu returns to header anchor', (await prefs()).position === null && Math.abs((await box()).left - initial.left) < 2);
   await evaluate("document.querySelector('.pv-overlay').style.transform = 'translate(37px, 21px)'; window.dispatchEvent(new Event('resize'))");
   // Changing the anchor forces a layout pass under the shifted containing block.
@@ -167,11 +202,28 @@ try {
   check('switching during drag cleans up pointer listeners', JSON.stringify((await prefs()).position) === JSON.stringify(beforeCancel));
   await click('[data-dss-pin]');
   check('pin button unpins without dragging or closing', !(await prefs()).pinned && await evaluate(`!!${card}`));
+  await evaluate(`${api}.toggleSection('sources'); ${api}.toggleSection('changes')`); await settle();
   await click('[data-dss-close]');
-  await call('Page.reload'); await waitFor('!!window.__summaryPreview'); await settle();
-  check('manual close stays closed on reload', !(await prefs()).pinned && await evaluate(`!${card}`));
+  check('closing frees reserved conversation space', await evaluate("!document.querySelector('.dss-conversation-layout')"));
+  check('manual close works for the current window', !(await prefs()).pinned && await evaluate(`!${card}`));
+  await call('Page.reload'); await waitFor('!!window.__summaryPreview && !!document.querySelector("[data-dsh-session-summary]")'); await settle();
+  check('reload reopens pinned and resets section defaults', (await prefs()).pinned && JSON.stringify(await expandedSections()) === '["changes"]');
+  check('window reset retains dragged position', JSON.stringify((await prefs()).position) === JSON.stringify(beforeCancel));
+  await evaluate(`localStorage.setItem(window.__summaryPreview.client.STORAGE_KEY, JSON.stringify({pinned:false,collapsed:{changes:true},position:{left:100,top:70}}))`);
+  await call('Page.reload'); await waitFor('!!window.__summaryPreview && !!document.querySelector("[data-dsh-session-summary]")'); await settle();
+  check('legacy saved close cannot suppress startup', (await prefs()).pinned && (await prefs()).position.left === 100 && JSON.stringify(await expandedSections()) === '["changes"]');
+  await click('[data-dss-close]');
+  const second = await send('Target.createTarget', { url: `${page}?persist=yes&tip=no`, newWindow: true });
+  const attached = await send('Target.attachToTarget', { targetId: second.targetId, flatten: true });
+  const newWindow = await send('Runtime.evaluate', {
+    expression: `new Promise(resolve => { let tries = 0; const timer = setInterval(() => { const card = document.querySelector('[data-dsh-session-summary]'); if (card || ++tries > 60) { clearInterval(timer); resolve(Boolean(card?.hasAttribute('data-pinned') && [...card.querySelectorAll('.dss-sec-head[aria-expanded=true]')].map(b => b.closest('[data-section]').dataset.section).join(',') === 'changes')); } }, 50); })`,
+    awaitPromise: true, returnByValue: true
+  }, attached.sessionId);
+  check('a separate window opens pinned with only changes expanded', newWindow.result.value === true);
+  await send('Target.closeTarget', { targetId: second.targetId });
+  await call('Page.bringToFront');
   await call('Page.navigate', { url: `${page}?mode=selftest` });
-  await waitFor('document.getElementById("selftest")?.textContent.includes("job stream released after close") || document.getElementById("selftest")?.textContent.startsWith("FAIL selftest crashed")');
+  await waitFor('document.getElementById("selftest")?.textContent.includes("job stream released after close") || /FAIL|ERRORS/.test(document.getElementById("selftest")?.textContent ?? "")');
   const report = await evaluate('document.getElementById("selftest").textContent');
   fs.writeFileSync(path.join(workspace, 'tests/.integration-data/preview/selftest.txt'), report);
   assert.ok(!/^(FAIL|ERRORS)\b/m.test(report), report);

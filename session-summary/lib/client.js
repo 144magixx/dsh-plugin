@@ -41,7 +41,9 @@ window.__ModuleLoader__.load({
       'unpin': '取消固定',
       'pin.hint': '已固定：切换会话或刷新页面后仍会显示',
       'drag.hint': '拖动以移动摘要；聚焦后用方向键移动，Home 恢复位置',
-      'position.reset': '恢复默认位置',
+      'position.reset': '靠边显示（避开正文）',
+      'compact.expand': '展开摘要',
+      'compact.collapse': '收起摘要',
       'more': '更多操作',
       'close': '关闭',
       'copyPath': '复制项目路径',
@@ -139,7 +141,9 @@ window.__ModuleLoader__.load({
       'unpin': 'Unpin',
       'pin.hint': 'Pinned: stays open across session switches and reloads',
       'drag.hint': 'Drag to move summary; use arrow keys when focused, Home to reset',
-      'position.reset': 'Reset position',
+      'position.reset': 'Dock beside conversation',
+      'compact.expand': 'Expand summary',
+      'compact.collapse': 'Collapse summary',
       'more': 'More actions',
       'close': 'Close',
       'copyPath': 'Copy project path',
@@ -597,26 +601,36 @@ window.__ModuleLoader__.load({
         ? { left: value.left, top: value.top } : null
     }
     function sanitizePrefs(value) {
-      const collapsed = {}
-      if (isRecord(value?.collapsed)) for (const id of SECTION_IDS) if (value.collapsed[id] === true) collapsed[id] = true
-      // Missing preferences opt into the new default; an explicit close/unpin wins.
-      return { pinned: value?.pinned !== false, collapsed, position: sanitizePosition(value?.position) }
+      // Each window starts open/pinned with only Changes expanded. Old saved
+      // close/collapse choices do not override startup; only position persists.
+      const collapsed = Object.fromEntries(SECTION_IDS.filter((id) => id !== 'changes').map((id) => [id, true]))
+      return { pinned: true, collapsed, floating: false, position: sanitizePosition(value?.position) }
+    }
+    /** Reserve a column on wide conversations, or a row above narrow ones. */
+    function summaryLayout(rect, viewport, floating) {
+      const layout = floating ? 'floating' : rect.width >= 900 ? 'side' : 'stack'
+      const width = Math.max(1, Math.min(layout === 'stack' ? 460 : 320, rect.width - 24, viewport.width - 24))
+      const right = Math.round(clamp(rect.right - 12, width + 12, viewport.width - 12))
+      const top = Math.max(12, rect.bottom + 8)
+      const maxHeight = Math.max(40, Math.min(viewport.height - top - (layout === 'stack' ? 160 : 24), viewport.height * (layout === 'stack' ? 0.45 : 0.72)))
+      return { right, top, width, maxHeight, layout }
     }
     /** Viewport coordinates, independent of the overlay's containing block. */
     function cardPlacement(anchor, position, viewport, measuredHeight) {
       const margin = 12
       const width = Math.max(1, Math.min(anchor.width, viewport.width - margin * 2))
-      const maxHeight = Math.max(1, Math.min(anchor.maxHeight, viewport.height - margin * 2))
+      const docked = !position && anchor.layout && anchor.layout !== 'floating'
+      const maxHeight = Math.max(1, Math.min(anchor.maxHeight, viewport.height - margin * 2, docked ? viewport.height - anchor.top - margin : Infinity))
       const height = Math.min(measuredHeight ?? maxHeight, maxHeight)
       const left = position?.left ?? anchor.right - width
       const top = position?.top ?? anchor.top
       return {
         left: clamp(left, margin, Math.max(margin, viewport.width - width - margin)),
-        top: clamp(top, margin, Math.max(margin, viewport.height - height - margin)),
+        top: docked ? top : clamp(top, margin, Math.max(margin, viewport.height - height - margin)),
         width, maxHeight
       }
     }
-    function createStore(initial, { storage, key, sanitize = (value) => value } = {}) {
+    function createStore(initial, { storage, key, sanitize = (value) => value, serialize = (value) => value } = {}) {
       let state = initial
       if (storage && key) {
         try { const raw = storage.getItem(key); if (raw) state = sanitize(JSON.parse(raw)) } catch { state = initial }
@@ -629,7 +643,7 @@ window.__ModuleLoader__.load({
           const next = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) }
           if (Object.keys(next).every((name) => next[name] === state[name]) && Object.keys(state).every((name) => name in next)) return
           state = next
-          if (storage && key) { try { storage.setItem(key, JSON.stringify(state)) } catch { /* private mode or quota */ } }
+          if (storage && key) { try { storage.setItem(key, JSON.stringify(serialize(state))) } catch { /* private mode or quota */ } }
           for (const listener of [...listeners]) listener()
         }
       }
@@ -694,7 +708,11 @@ window.__ModuleLoader__.load({
 .dss-toggle svg{width:15px;height:15px}
 .dss-toggle[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .dss-toggle-badge{position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 1.5px var(--dsw-alias-bg-base)}
-.dss-card{position:fixed;z-index:30;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;text-align:left;-webkit-app-region:no-drag;cursor:default;pointer-events:auto}
+.dss-card{position:fixed;z-index:30;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);background:color-mix(in srgb,var(--dsw-specific-menu) 88%,transparent);backdrop-filter:var(--dsw-menu-backdrop-filter);-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;text-align:left;-webkit-app-region:no-drag;cursor:default;pointer-events:auto}
+.dss-conversation-layout{margin-right:var(--dss-side-space,0px);margin-top:var(--dss-top-space,0px);min-width:0}
+.dss-card[data-compact-collapsed] .dss-body,.dss-card[data-compact-collapsed] .dss-notice{display:none}
+.dss-card[data-compact-collapsed] .dss-head:has(.dss-menu){flex-wrap:wrap}
+.dss-card[data-compact-collapsed] .dss-menu{position:static;flex:0 0 100%;margin-top:4px;box-shadow:none}
 .dss-head{flex:none;display:flex;align-items:center;gap:2px;padding:10px 8px 6px 14px;position:relative}
 .dss-project{flex:1;min-width:0;display:flex;align-items:center;gap:7px;margin-right:4px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;font-weight:600;border-radius:var(--dsw-radius-xs)}
 .dss-project svg{flex:none;color:var(--dsw-alias-label-secondary)}
@@ -913,7 +931,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
     function knownKey(t, key, fallback) { return ZH[key] !== undefined ? t(key) : fallback }
 
     /** Pure view of one prepared model; every action arrives as a callback. */
-    function SummaryCard({ model, t, actions, prefs, expanded, onExpand, menuOpen, setMenuOpen, notice, dragHandle }) {
+    function SummaryCard({ model, t, actions, prefs, expanded, onExpand, menuOpen, setMenuOpen, notice, dragHandle, compact, compactExpanded, onToggleCompact }) {
       const collapsed = prefs.collapsed ?? {}
       const toggleSection = actions.toggleSection
       const sections = []
@@ -992,6 +1010,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         h('div', { className: 'dss-head' },
           h(Tip, { label: `${projectTip}\n${t('drag.hint')}` },
             h('div', { className: 'dss-project', tabIndex: 0, 'aria-label': `${project.cwd || t('project.none')}. ${t('drag.hint')}`, 'data-dss-drag-handle': '', ...dragHandle }, h(Icon, { name: 'folder', size: 16 }), h('span', { className: 'dss-project-name' }, project.name || t('project.none')))),
+          compact ? h(Tip, { label: t(compactExpanded ? 'compact.collapse' : 'compact.expand') }, h('button', { type: 'button', className: 'dss-icon-btn', 'data-dss-compact': '', 'aria-expanded': compactExpanded, 'aria-label': t(compactExpanded ? 'compact.collapse' : 'compact.expand'), onClick: onToggleCompact }, h('span', { style: { display: 'inline-flex', transform: compactExpanded ? 'rotate(180deg)' : undefined } }, h(Icon, { name: 'chevronDown', size: 14 })))) : null,
           h(Tip, { label: t(prefs.pinned ? 'unpin' : 'pin') },
             h('button', { type: 'button', className: 'dss-icon-btn', 'aria-pressed': prefs.pinned, 'aria-label': t(prefs.pinned ? 'unpin' : 'pin'), 'data-dss-pin': '', onClick: actions.togglePin }, h(Icon, { name: prefs.pinned ? 'pinFill' : 'pin', size: 14 }))),
           h(Tip, { label: t('more') },
@@ -1101,27 +1120,43 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
 
       React.useLayoutEffect(() => { api.publish(sessionId, { model, context: { cwd, subagent, catalog: Array.isArray(catalog) ? catalog : EMPTY } }) }, [api, sessionId, model, cwd, subagent, catalog])
       React.useLayoutEffect(() => () => api.unpublish(sessionId), [api, sessionId])
-      // Placement: below this conversation's header, flush with its right edge.
+      const floating = useStore(api.prefs, (state) => state.floating)
+      const cardHeight = useStore(api.ui, (state) => state.cardHeight)
+      const cardHeightRef = React.useRef(cardHeight)
+      cardHeightRef.current = cardHeight
+      const placeRef = React.useRef(null)
+      React.useLayoutEffect(() => { placeRef.current?.() }, [cardHeight])
+      // Reserve space only inside the owning conversation. No shell replacement.
       // The anchor arrives as state from a callback ref: a parent's object ref
       // is not attached yet when this child's layout effect first runs.
       React.useLayoutEffect(() => {
         const header = anchorElement?.closest?.('header') ?? anchorElement
         if (!header || typeof window === 'undefined') return
-        const place = () => {
-          const rect = header.getBoundingClientRect()
-          const viewportWidth = window.innerWidth, viewportHeight = window.innerHeight
-          const width = Math.round(clamp(Math.min(340, rect.width - 32), 240, viewportWidth - 24))
-          const right = Math.round(clamp(rect.right - 12, width + 12, viewportWidth - 12))
-          const top = Math.round(Math.max(8, rect.bottom + 8))
-          const maxHeight = Math.round(Math.max(180, Math.min(viewportHeight - top - 24, viewportHeight * 0.72)))
-          api.publishAnchor(sessionId, { right, top, width, maxHeight })
+        const root = header.closest('[data-phase]')
+        const content = [...(root?.querySelectorAll('[data-conversation-content]') ?? [])].find((element) => element.getAttribute('data-conversation-session') === sessionId && element.closest('[data-phase]') === root)
+        const clearSpace = () => {
+          content?.classList.remove('dss-conversation-layout')
+          content?.style.removeProperty('--dss-side-space')
+          content?.style.removeProperty('--dss-top-space')
         }
+        const place = () => {
+          const anchor = summaryLayout(header.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, floating || !content)
+          if (content && anchor.layout !== 'floating') {
+            content.classList.add('dss-conversation-layout')
+            content.style.setProperty('--dss-side-space', `${anchor.layout === 'side' ? anchor.width + 24 : 0}px`)
+            content.style.setProperty('--dss-top-space', `${anchor.layout === 'stack' ? Math.min(cardHeightRef.current, anchor.maxHeight) + 20 : 0}px`)
+          } else clearSpace()
+          api.publishAnchor(sessionId, anchor)
+        }
+        placeRef.current = place
         place()
-        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null
+        let frame = 0
+        const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place) }
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
         observer?.observe(header)
-        window.addEventListener('resize', place)
-        return () => { observer?.disconnect(); window.removeEventListener('resize', place) }
-      }, [api, sessionId, anchorElement])
+        window.addEventListener('resize', schedule)
+        return () => { observer?.disconnect(); cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); placeRef.current = null; clearSpace() }
+      }, [api, sessionId, anchorElement, floating])
       return null
     }
 
@@ -1162,6 +1197,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const [expanded, setExpanded] = React.useState({})
       const [menuOpen, setMenuOpen] = React.useState(false)
       const [notice, setNotice] = React.useState(null)
+      const [compactExpanded, setCompactExpanded] = React.useState(false)
+      const compact = anchor?.layout === 'stack'
       const [offset, setOffset] = React.useState({ x: 0, y: 0 })
       const close = React.useCallback(() => api.close(), [api])
 
@@ -1169,15 +1206,17 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const [measuredHeight, setMeasuredHeight] = React.useState(null)
       const [dragPosition, setDragPosition] = React.useState(null)
       const dragRef = React.useRef(null)
-      const placement = anchor ? cardPlacement(anchor, dragPosition ?? prefs.position, viewport, measuredHeight) : null
+      const placement = anchor ? cardPlacement(anchor, dragPosition ?? (prefs.floating ? prefs.position : null), viewport, measuredHeight) : null
       React.useLayoutEffect(() => {
         const resize = () => setViewport({ width: window.innerWidth, height: window.innerHeight })
-        const measure = () => { if (cardRef.current) setMeasuredHeight(cardRef.current.getBoundingClientRect().height) }
+        const measure = () => { if (cardRef.current) { const height = cardRef.current.getBoundingClientRect().height; setMeasuredHeight(height); api.ui.set({ cardHeight: height }) } }
         measure()
-        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null
+        let frame = 0
+        const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure) }
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
         if (cardRef.current) observer?.observe(cardRef.current)
         window.addEventListener('resize', resize)
-        return () => { observer?.disconnect(); window.removeEventListener('resize', resize) }
+        return () => { observer?.disconnect(); cancelAnimationFrame(frame); window.removeEventListener('resize', resize) }
       }, [])
       // Keep containing-block compensation separate from the user's viewport position.
       React.useLayoutEffect(() => {
@@ -1306,8 +1345,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const style = placement
         ? { ...placement, top: placement.top + offset.y, left: placement.left + offset.x }
         : { visibility: 'hidden', top: 0, left: 0 }
-      return h('section', { id: CARD_ID, ref: cardRef, className: 'dss-card', role: 'dialog', 'aria-label': t('card.aria'), 'data-dsh-session-summary': sessionId, 'data-pinned': pinned ? '' : undefined, 'data-dragging': dragPosition ? '' : undefined, style },
-        h(SummaryCard, { model, t, actions, prefs, expanded, onExpand: (id) => setExpanded((current) => ({ ...current, [id]: !current[id] })), menuOpen, setMenuOpen, notice, dragHandle }))
+      return h('section', { id: CARD_ID, ref: cardRef, className: 'dss-card', role: 'dialog', 'aria-label': t('card.aria'), 'data-dsh-session-summary': sessionId, 'data-pinned': pinned ? '' : undefined, 'data-dragging': dragPosition ? '' : undefined, 'data-layout': anchor?.layout, 'data-compact-collapsed': compact && !compactExpanded ? '' : undefined, style },
+        h(SummaryCard, { model, t, actions, prefs, expanded, onExpand: (id) => setExpanded((current) => ({ ...current, [id]: !current[id] })), menuOpen, setMenuOpen, notice, dragHandle, compact, compactExpanded, onToggleCompact: () => setCompactExpanded(value => !value) }))
     }
     function SummaryOverlay({ api, t }) {
       const view = useStore(api.view, selectView)
@@ -1329,8 +1368,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
 
     // ---------------------------------------------------------------- apply
     function createApi(ctx, { storage, fetchImpl, transportFetch, clipboard, openWindow }) {
-      const prefs = createStore(sanitizePrefs({}), { storage, key: STORAGE_KEY, sanitize: sanitizePrefs })
-      const ui = createStore({ openSession: null })
+      const prefs = createStore(sanitizePrefs({}), { storage, key: STORAGE_KEY, sanitize: sanitizePrefs, serialize: ({ position }) => ({ position }) })
+      const ui = createStore({ openSession: null, cardHeight: 40 })
       const view = createStore({ view: null })
       const tip = createStore({ tip: null })
       const summaries = createSummaryCache(fetchImpl)
@@ -1345,7 +1384,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const tabs = () => service('sidebarRightTabs')
       return {
         prefs, ui, view, tip, summaries, service,
-        setPosition(position) { prefs.set({ position: sanitizePosition(position) }) },
+        setPosition(position) { const next = sanitizePosition(position); prefs.set({ position: next, floating: next !== null }) },
         open(sessionId) { ui.set({ openSession: sessionId }) },
         close() { prefs.set({ pinned: false }); ui.set({ openSession: null }) },
         togglePin(sessionId) {
@@ -1364,7 +1403,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         publishAnchor(sessionId, anchor) {
           const current = view.getSnapshot().view
           const previous = current?.sessionId === sessionId ? current.anchor : undefined
-          if (previous && previous.right === anchor.right && previous.top === anchor.top && previous.width === anchor.width && previous.maxHeight === anchor.maxHeight) return
+          if (previous && previous.right === anchor.right && previous.top === anchor.top && previous.width === anchor.width && previous.maxHeight === anchor.maxHeight && previous.layout === anchor.layout) return
           view.set((state) => ({ view: { ...(state.view?.sessionId === sessionId ? state.view : {}), sessionId, anchor } }))
         },
         unpublish(sessionId) { if (view.getSnapshot().view?.sessionId === sessionId) view.set({ view: null }) },
@@ -1454,7 +1493,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       // Pure helpers exported for the package's own tests.
       deriveChat, aggregateChanges, deriveSubagents, deriveRelated, deriveJobs, deriveTodos, planModeActive, fileReferences, parseMcpName, callInfo,
       fileAddressFor, changesReviewAddress, subagentChatAddress, planAddress, changesSummaryUrl, formatDuration, formatTokens, basename, hostOf, displayPath,
-      createStore, sanitizePrefs, sanitizePosition, cardPlacement, createSummaryCache, createApi, SummaryCard, SummaryCardHost, SummaryOverlay, SummaryToggle, SummaryData, ApiContext,
+      createStore, sanitizePrefs, sanitizePosition, cardPlacement, summaryLayout, createSummaryCache, createApi, SummaryCard, SummaryCardHost, SummaryOverlay, SummaryToggle, SummaryData, ApiContext,
       HOST_ICONS, ZH, EN, CSS, SLOT, ENTRY_ID, OVERLAY_SLOT, OVERLAY_ID, STORAGE_KEY, SECTION_IDS
     }
   }
