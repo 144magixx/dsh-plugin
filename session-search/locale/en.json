@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Search",
+    "description": "Find session titles and message text with Cmd/Ctrl+F; search across sessions with Cmd/Ctrl+Shift+F."
+  }
+}

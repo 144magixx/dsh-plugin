@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "会话搜索",
+    "description": "Cmd/Ctrl+F 查找当前会话内容，Cmd/Ctrl+Shift+F 搜索会话标题与跨会话正文。"
+  }
+}

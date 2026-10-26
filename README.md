@@ -10,6 +10,7 @@
 |---|---|---|---|
 | **岔路 · Side Branch** | [side-branch](side-branch/README.md) | 从历史轮次继续，或修改历史提问，在侧栏使用完整原生会话 | `dsh-side-branch` |
 | **会话摘要悬浮框 · Session Summary** | [session-summary](session-summary/README.md) | 在对话右上角弹出可固定的摘要卡片：改动、子智能体、来源、计划、生成文件、后台任务、关联会话 | `dsh-session-summary` |
+| **会话搜索 · Session Search** | [session-search](session-search/README.md) | Cmd/Ctrl+F 搜索当前会话，Cmd/Ctrl+Shift+F 搜索会话标题与跨会话正文 | `dsh-session-search` |
 
 ## 获取代码
 
@@ -28,7 +29,7 @@ macOS 与 Windows 通用；仓库通过 `.gitattributes` 统一使用 LF 换行�
 | macOS | `/Users/<你的用户名>/dsh-plugin/side-branch` |
 | Windows | `E:\dsh-plugin\side-branch` |
 
-安装成功后启用对应插件。session-summary 同理，把目录换成 `session-summary`。
+安装成功后启用对应插件。会话摘要和会话搜索同理，把目录换成 `session-summary` 或 `session-search`。
 
 > macOS 获取绝对路径：在终端进入该目录执行 `pwd`，或把 Finder 中的文件夹拖进终端窗口。
 
@@ -94,6 +95,7 @@ dsh-plugin/
 │   ├── scripts/
 │   └── artifacts/          # 此插件的安装包及验证产物（不提交）
 ├── session-summary/         # 会话摘要悬浮框 · Session Summary
+├── session-search/          # 会话搜索 · Session Search
 └── <下一个插件>/
 ```
 
@@ -103,3 +105,4 @@ dsh-plugin/
 
 - 岔路：[使用指南](side-branch/docs/使用指南.md)、[README](side-branch/README.md)
 - 会话摘要：[使用文档](session-summary/docs/使用文档.md)、[README](session-summary/README.md)
+- 会话搜索：[README](session-search/README.md)、[验收记录](session-search/docs/验收记录.md)
