@@ -61,6 +61,84 @@ test('actual native fork keeps prefix, current model and permissions, and source
   } finally { await h.close(); }
 });
 
+test('native UUID user prompts branch through turn-based HTTP requests without changing the source', async () => {
+  const h = await createIsolatedHost();
+  try {
+    const a = await source(h);
+    const events = a.session.snapshotEvents();
+    const original = JSON.stringify(events);
+    const prompts = events.filter(e => e.type === 'user/message' && e.surfaceOp === 'append' && e.data.source?.kind === 'user');
+    const calls = h.adapter.requests.length;
+    const post = async (operation, args) => {
+      const route = h.routes.get(`/api/side-branch/${operation}`).fetch;
+      const response = await route(new Request('http://offline.invalid', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(args)
+      }));
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    for (const intent of ['fork', 'revise']) {
+      const turn = 2;
+      const mode = intent === 'fork' ? 'continue' : 'edit';
+      const inheritedTurns = intent === 'fork' ? turn : turn - 1;
+      const prompt = prompts[turn - 1];
+      const originalPrompt = intent === 'fork' ? '' : prompt.data.content.filter(p => p.type === 'text').map(p => p.text).join('\n');
+      assert.match(prompt.data.id, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i, 'the native LLM message factory supplies the raw UUID');
+      const start = events.find(e => e.type === 'turn/start' && e.data.turn === turn);
+      const end = events.find(e => e.type === 'turn/end' && e.data.turn === turn);
+      const nextEnd = events.find(e => e.type === 'turn/end' && e.data.turn === turn + 1);
+      const answer = events.find(e => e.type === 'assistant/message' && e.seq > start.seq && e.seq < end.seq && e.surfaceOp === 'append');
+      const nextAnswer = events.find(e => e.type === 'assistant/message' && e.seq > end.seq && e.seq < nextEnd.seq && e.surfaceOp === 'append');
+      assert.ok(answer?.data.message.id, 'the selected turn has a completed native answer');
+      assert.ok(nextAnswer?.data.message.id, 'the following turn has an answer to exclude');
+      assert.ok(start.seq < prompt.seq, 'fixture records the native start-before-admission ordering');
+      const expectedBoundary = events.find(e => e.type === 'turn/end' && e.data.turn === inheritedTurns).seq;
+      const args = { sourceSessionId: a.id, mode, turn, expectedPromptMessageId: prompt.data.id, intent };
+      assert.equal('messageId' in args, false, 'legacy servers must receive their supported turn anchor');
+      const inspected = await post('anchor-info', args);
+      assert.equal(inspected.ok, true);
+      assert.equal(inspected.anchor.mode, mode);
+      assert.equal(inspected.anchor.intent, intent);
+      assert.equal(inspected.anchor.turn, turn);
+      assert.equal(inspected.anchor.atSeq, expectedBoundary);
+      assert.equal(inspected.anchor.originalPrompt, originalPrompt);
+      assert.equal(inspected.anchor.inheritedTurns, inheritedTurns);
+      const created = await post('create', { ...args, requestId: `native-prompt-${intent}-${turn}` });
+      assert.equal(created.ok, true);
+      assert.equal(created.branch.ready, true);
+      assert.equal(created.branch.mode, mode);
+      assert.equal(created.branch.intent, intent);
+      assert.equal(created.branch.turn, turn);
+      assert.equal(created.branch.atSeq, expectedBoundary);
+      assert.equal(created.branch.originalPrompt, originalPrompt, 'only revise supplies the original prompt as a draft');
+      assert.equal(created.branch.inheritedTurns, inheritedTurns);
+      const child = h.ctx.agents.get(created.branch.sessionId);
+      assert.equal(created.branch.inheritedEventCount, expectedBoundary + 1);
+      const prefix = child.session.snapshotEvents().slice(0, created.branch.inheritedEventCount);
+      assert.deepEqual(prefix, events.slice(0, created.branch.inheritedEventCount));
+      const hasPrompt = messageId => prefix.some(e => e.type === 'user/message' && e.data.id === messageId);
+      const hasAnswer = messageId => prefix.some(e => e.type === 'assistant/message' && e.data.message.id === messageId);
+      assert.equal(hasPrompt(prompt.data.id), intent === 'fork', 'fork preserves the selected question; revise cuts before it');
+      assert.equal(hasAnswer(answer.data.message.id), intent === 'fork', 'fork preserves the selected answer; revise cuts before it');
+      assert.equal(hasPrompt(prompts[turn].data.id), false, 'the next question never enters the branch prefix');
+      assert.equal(hasAnswer(nextAnswer.data.message.id), false, 'the next answer never enters the branch prefix');
+      assert.equal(child.status, 'idle');
+      assert.equal(h.adapter.requests.length, calls, 'neither user action wakes a model');
+      assert.equal(JSON.stringify(a.session.snapshotEvents()), original, 'each user action leaves the source unchanged');
+    }
+    const mismatch = { sourceSessionId: a.id, mode: 'edit', turn: 2, expectedPromptMessageId: prompts[0].data.id, intent: 'revise' };
+    for (const operation of ['anchor-info', 'create']) {
+      const rejected = await post(operation, { ...mismatch, requestId: 'native-prompt-mismatch' });
+      assert.equal(rejected.ok, false);
+      assert.equal(rejected.code, 'anchor-mismatch');
+    }
+    assert.equal(h.ctx.sideBranch.table.get('native-prompt-mismatch'), undefined, 'mismatched anchors fail before branch metadata or children are created');
+    assert.equal((await h.ctx.sessionQuery.listSessions()).length, 3);
+    assert.equal(h.adapter.requests.length, calls, 'inspection and creation never wake a model');
+    assert.equal(JSON.stringify(a.session.snapshotEvents()), original);
+  } finally { await h.close(); }
+});
+
 test('pending branch notice and native session persist across a fresh in-memory host', async () => {
   let h = await createIsolatedHost();
   let closed = false;

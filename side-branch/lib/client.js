@@ -37,6 +37,9 @@ window.__ModuleLoader__.load({
       reopen: '重新打开', retainedNotice: '分支已保留', error: '操作失败', sourceArchived: '源会话已归档',
       requestSaved: '创建请求已保存；重试将恢复同一个分支', configError: '分支尚未完成初始化，暂不能发送消息',
       newRequest: '检查会话列表后另建分支', newRequestHelp: '之前的分支可能已经创建，或已包含待处理输入。请先检查会话列表；另建分支会保留原会话及其中的工作。',
+      editPrompt: '编辑', forkPrompt: '分叉', editPromptHint: '编辑这条历史提问', forkPromptHint: '保留这一轮的提问和回答，从本轮之后创建侧栏分支',
+      saveEdit: '保存并重新发送', prepareEdit: '在输入框中继续', revisionHelp: '修改后在主视图打开新版本，保留旧版本；不继承本轮原回答和后续对话。', editAttachments: '原提问含附件：修改后将打开新版本的输入框，请重新添加附件再发送。',
+      forkTitle: '第 {turn} 轮分叉', forkEditing: '分叉起点：第 {turn} 轮提问', userUnavailable: '本轮完成后可编辑提问或分叉',
       modelHint: '初始模型和权限取源会话当前配置；可在原生输入框中调整', clearChoice: '清除记住的关闭选择'
     }
     const EN = {
@@ -60,12 +63,17 @@ window.__ModuleLoader__.load({
       reopen: 'Reopen', retainedNotice: 'Branch kept', error: 'Operation failed', sourceArchived: 'Source session archived',
       requestSaved: 'Creation request saved; retry will recover the same branch', configError: 'Branch initialization is incomplete; sending is unavailable',
       newRequest: 'Inspect sessions, then create another branch', newRequestHelp: 'The previous branch may already exist or contain pending input. Inspect the session list first; creating another branch keeps the original session and its work.',
+      editPrompt: 'Edit', forkPrompt: 'Fork', editPromptHint: 'Edit this historical prompt', forkPromptHint: 'Keep this turn’s prompt and answer, then fork after this turn',
+      saveEdit: 'Save and resend', prepareEdit: 'Continue in composer', revisionHelp: 'Open an edited version in the main view and keep the original. Its old answer and later conversation are excluded.', editAttachments: 'This prompt has attachments. Continue in the new version’s composer, add the attachments again, then send.',
+      forkTitle: 'Fork at turn {turn}', forkEditing: 'Fork starts at prompt {turn}', userUnavailable: 'Edit or fork this prompt after the turn finishes',
       modelHint: 'Initial model and permissions come from the source’s current settings; change them in the native composer', clearChoice: 'Clear remembered close choice'
     }
 
     function branchAddress(branch) {
       if (!branch || typeof branch.sessionId !== 'string' || !branch.sessionId || typeof branch.sourceSessionId !== 'string' || !branch.sourceSessionId || !['continue', 'edit'].includes(branch.mode) || !Number.isSafeInteger(branch.turn) || branch.turn < 1) throw new Error('Invalid branch address')
-      return `${PREFIX}${encodeURIComponent(branch.sessionId)}?${new URLSearchParams({ source: branch.sourceSessionId, mode: branch.mode, turn: String(branch.turn) })}`
+      const params = new URLSearchParams({ source: branch.sourceSessionId, mode: branch.mode, turn: String(branch.turn) })
+      if (['fork', 'revise'].includes(branch.intent)) params.set('intent', branch.intent)
+      return `${PREFIX}${encodeURIComponent(branch.sessionId)}?${params}`
     }
     function parseBranchAddress(value) {
       try {
@@ -77,7 +85,9 @@ window.__ModuleLoader__.load({
         const turn = Number(turnText)
         if (url.protocol !== 'dsh-resource:' || url.hostname !== KIND || parts.length !== 2 || parts[0] !== 'session' || !sourceSessionId || !['continue', 'edit'].includes(mode) || !/^\d+$/.test(turnText ?? '') || !Number.isSafeInteger(turn) || turn < 1) return null
         const sessionId = decodeURIComponent(parts[1])
-        return sessionId ? { sessionId, sourceSessionId, mode, turn } : null
+        const intent = url.searchParams.get('intent')
+        if (intent !== null && !['fork', 'revise'].includes(intent)) return null
+        return sessionId ? { sessionId, sourceSessionId, mode, turn, ...(intent ? { intent } : {}) } : null
       } catch { return null }
     }
     function errorText(error) { return error instanceof Error ? error.message : String(error?.message ?? error) }
@@ -123,6 +133,17 @@ window.__ModuleLoader__.load({
       }
       return lookup.get(messageId) ?? ''
     }
+    function nativeUserTurnState(snapshot, node) {
+      const location = node?.location
+      if (node?.kind !== 'user' || node.data?.source?.kind !== 'user' || typeof node.id !== 'string' || !node.id || !['turn', 'step'].includes(location?.kind)) return ''
+      const turn = location.turn?.turn
+      if (!Number.isSafeInteger(turn) || turn < 1 || !snapshot?.locations?.getTurn || !snapshot?.nodes?.get) return ''
+      const prompts = snapshot.locations.getTurn(turn).map((key) => snapshot.nodes.get(key)).filter((item) => ['user', 'steering'].includes(item?.kind) && item.data?.source?.kind === 'user')
+      const first = prompts.reduce((initial, item) => !initial || item.data.seq < initial.data.seq ? item : initial, null)
+      if (first?.id !== node.id) return ''
+      const recorded = snapshot.timeline?.turns?.get(turn) ?? location.turn
+      return `${turn}:${recorded?.end ? 'ready' : 'blocked'}`
+    }
     function eligible(row, mode) { return row?.completed === true && (mode === 'edit' ? row.editable === true : row.branchable !== false) }
     function retryBranchAddress(value, nonce) {
       if (!parseBranchAddress(value)) throw new Error('Invalid side-branch resource')
@@ -139,6 +160,11 @@ window.__ModuleLoader__.load({
         return { records: Array.isArray(data.records) ? data.records.filter((item) => { try { return !!branchAddress(item) } catch { return false } }) : [], preference: ['keep', 'archive'].includes(data.preference) ? data.preference : null, requests: data.requests && typeof data.requests === 'object' && !Array.isArray(data.requests) ? data.requests : {} }
       } catch { return { records: [], preference: null, requests: {} } }
     }
+    function requestKey(request) {
+      const identity = [request.sourceSessionId, request.mode, request.turn ?? null, request.messageId ?? null]
+      if (request.expectedPromptMessageId !== undefined || request.intent !== undefined || request.editId !== undefined) identity.push(request.expectedPromptMessageId ?? null, request.intent ?? null, request.editId ?? null)
+      return JSON.stringify(identity)
+    }
     /** All close work is recorded synchronously before the native void handler returns. */
     function createRuntime({ api, storage, makeId, onRecover = () => {}, log = console }) {
       let state = readRecovery(storage)
@@ -154,7 +180,7 @@ window.__ModuleLoader__.load({
       function record(branch, patch = {}) {
         const { sessionId, sourceSessionId, turn, mode } = branch
         const previous = state.records.find((item) => item.sessionId === sessionId)
-        const next = { ...previous, sessionId, sourceSessionId, turn, mode, ...patch }
+        const next = { ...previous, sessionId, sourceSessionId, turn, mode, ...(branch.intent ? { intent: branch.intent } : {}), ...patch }
         state = { ...state, records: [...state.records.filter((item) => item.sessionId !== sessionId), next] }
         publish()
       }
@@ -164,21 +190,22 @@ window.__ModuleLoader__.load({
         setPreference(preference) { state = { ...state, preference: ['keep', 'archive'].includes(preference) ? preference : null }; publish() },
         record, forget,
         create(request) {
-          const key = JSON.stringify([request.sourceSessionId, request.mode, request.turn ?? null, request.messageId ?? null])
+          const key = requestKey(request)
           if (creations.has(key)) return creations.get(key)
           const requestId = state.requests[key] ?? makeId()
           state = { ...state, requests: { ...state.requests, [key]: requestId } }; publish()
           const operation = api('create', { ...request, requestId }).then((result) => {
             if (!result.branch?.ready) throw new Error('Branch initialization is incomplete')
-            record(result.branch, { requestKey: key })
+            const branch = request.intent ? { ...result.branch, intent: request.intent } : result.branch
+            record(branch, { requestKey: key })
             // Keep request id until navigation succeeds; a failed open can retry safely.
-            return result.branch
+            return branch
           }).finally(() => creations.delete(key))
           creations.set(key, operation)
           return operation
         },
         newRequest(request) {
-          const key = JSON.stringify([request.sourceSessionId, request.mode, request.turn ?? null, request.messageId ?? null])
+          const key = requestKey(request)
           if (creations.has(key)) throw new Error('Branch creation is still pending')
           const requests = { ...state.requests }; delete requests[key]
           // Detach the old branch's retry link so reopening it cannot clear the
@@ -190,7 +217,7 @@ window.__ModuleLoader__.load({
           state = { ...state, requests, records }; publish()
         },
         createdOpened(request) {
-          const key = JSON.stringify([request.sourceSessionId, request.mode, request.turn ?? null, request.messageId ?? null])
+          const key = requestKey(request)
           const requests = { ...state.requests }; delete requests[key]; state = { ...state, requests }; publish()
         },
         opened(branch) {
@@ -244,6 +271,7 @@ window.__ModuleLoader__.load({
           const data = await api('branch', { sessionId: parsed.sessionId }, signal)
           if (signal.aborted) return
           if (!data.branch?.ready || data.branch.sessionId !== parsed.sessionId || data.branch.sourceSessionId !== parsed.sourceSessionId || data.branch.mode !== parsed.mode || data.branch.turn !== parsed.turn) throw new Error('Branch initialization is incomplete or resource identity does not match')
+          if (parsed.intent && !data.branch.intent) data.branch = { ...data.branch, intent: parsed.intent }
           const reference = ctx.sessions.retain(parsed.sessionId, { source: 'sidebarChat', signal })
           try {
             await reference.ready
@@ -269,6 +297,7 @@ window.__ModuleLoader__.load({
 .sb-scroll{overflow:auto;min-height:0;padding:14px;display:flex;flex-direction:column;gap:12px}.sb-native{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}.sb-native>div{min-height:0}
 .sb-header{flex:none;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-l3);font-size:12px;line-height:1.5;max-height:42%;overflow:auto}.sb-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sb-title{font-weight:600}.sb-muted{color:var(--dsw-alias-label-tertiary);font-size:12px}.sb-card{padding:12px;border:1px solid var(--dsw-alias-border-l3);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
 .sb-btn{font:inherit;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);border-radius:6px;padding:5px 9px;cursor:pointer}.sb-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}.sb-btn:disabled{opacity:.5;cursor:default}.sb-btn:focus-visible,.sb-field:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:2px}.sb-action{font:inherit;font-size:11px;padding:2px 5px;background:transparent;border:0;color:var(--dsw-alias-label-tertiary);cursor:pointer}.sb-action:disabled{opacity:.5;cursor:default}
+.sb-prompt-editor{align-self:flex-end;width:min(100%,720px);box-sizing:border-box;padding:12px;border:1px solid var(--dsw-alias-border-l3);border-radius:12px;background:var(--dsw-alias-bg-layer-1)}.sb-prompt-editor textarea{min-height:110px;resize:vertical;line-height:1.6}.sb-prompt-editor p{margin:8px 0}.sb-user-message{min-width:0}.sb-user-actions{position:relative;display:inline-flex;align-items:center;flex:none}.sb-user-actions .sb-action{font-size:var(--dsh-content-font-size-secondary,13px);line-height:24px;border-radius:5px;padding:0 6px;white-space:nowrap}.sb-user-actions .sb-action:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}.sb-user-actions .sb-action:focus-visible{outline:2px solid var(--dsw-alias-label-primary);outline-offset:1px}.sb-user-error{position:absolute;z-index:10;top:100%;right:0;width:280px;max-width:70vw;padding:10px;border:1px solid var(--dsw-alias-border-l3);border-radius:6px;background:var(--dsw-alias-bg-layer-1);font-size:12px;line-height:1.5}
 .sb-field{box-sizing:border-box;width:100%;font:inherit;padding:7px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l3);border-radius:6px}.sb-turn{width:100%;text-align:left;display:block}.sb-turn[aria-pressed=true]{outline:1px solid var(--dsw-alias-label-primary)}.sb-turn p{margin:4px 0;overflow-wrap:anywhere}.sb-notice{padding:8px 10px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l3);border-radius:6px;margin:8px 0;overflow-wrap:anywhere}.sb-notice summary{cursor:pointer}.sb-notice ul{margin:6px 0;padding-left:20px}.sb-error{white-space:pre-wrap;overflow-wrap:anywhere}.sb-original{white-space:pre-wrap;max-height:180px;overflow:auto;font:inherit}.sb-space{margin-top:8px}.sb-close{border:1px solid var(--dsw-alias-label-tertiary)}
 `
     function Style() { return h('style', null, CSS) }
@@ -298,7 +327,7 @@ window.__ModuleLoader__.load({
       const state = React.useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot)
       const pending = state.records.filter((record) => record.pendingClose || record.pendingOpen)
       return h(React.Fragment, null, pending.length > 0 && h('section', null, h('h3', null, t('recovery')), h('p', { className: 'sb-muted' }, t('recoveryBody')),
-        pending.map((branch) => h('div', { className: 'sb-card', key: branch.sessionId }, h('div', { className: 'sb-row' }, h('strong', null, t(branch.mode === 'edit' ? 'editTitle' : 'turnTitle', { turn: branch.turn })), h(Button, { onClick: () => openBranch(branch) }, t('reopen'))), h(ErrorView, { error: branch.error, t }), branch.pendingClose && h(CloseChoice, { branch, running: branch.running, runtime, t })))), 
+        pending.map((branch) => h('div', { className: 'sb-card', key: branch.sessionId }, h('div', { className: 'sb-row' }, h('strong', null, t(branch.intent === 'fork' ? 'forkTitle' : branch.mode === 'edit' ? 'editTitle' : 'turnTitle', { turn: branch.turn })), h(Button, { onClick: () => openBranch(branch) }, t('reopen'))), h(ErrorView, { error: branch.error, t }), branch.pendingClose && h(CloseChoice, { branch, running: branch.running, runtime, t })))),
         state.preference && h(Button, { onClick: () => runtime.setPreference(null) }, t('clearChoice')))
     }
     function Picker({ sessionId, tab, runtime, t, nativeAvailable, openMain }) {
@@ -379,7 +408,7 @@ window.__ModuleLoader__.load({
       }
       const supported = typeof renderFactorySlot === 'function' && typeof inputActions?.setDraft === 'function'
       return h('div', { className: 'sb-root' }, h('div', { className: 'sb-header' },
-        h('div', { className: 'sb-row' }, h('strong', null, t(editing ? 'editing' : branch.mode === 'edit' ? 'editTitle' : 'anchored', { turn: branch.turn })), h(Button, { onClick: () => openMain(sessionId) }, t('openMain')), h(Button, { onClick: close }, t('close'))),
+        h('div', { className: 'sb-row' }, h('strong', null, t(branch.intent === 'fork' && branch.mode === 'continue' ? 'anchored' : branch.intent === 'fork' ? 'forkEditing' : editing ? 'editing' : branch.mode === 'edit' ? 'editTitle' : 'anchored', { turn: branch.turn })), h(Button, { onClick: () => openMain(sessionId) }, t('openMain')), h(Button, { onClick: close }, t('close'))),
         editing && h('div', { className: 'sb-muted' }, branch.turn === 1 ? t('retainedNone') : t('retained', { keep: branch.turn - 1, from: branch.turn, total: branch.totalTurns })),
         editing && h('div', { className: 'sb-muted' }, t('native')),
         editing && branch.attachmentCount > 0 && h('div', { className: 'sb-notice' }, t('attachments', { count: branch.attachmentCount })),
@@ -429,6 +458,122 @@ window.__ModuleLoader__.load({
       }
       return h('span', { className: 'sb-row' }, h(Style), ['continue', 'edit'].map((mode) => h('button', { key: mode, type: 'button', className: 'sb-action', disabled: busy || !available(mode), title: !nativeAvailable ? t('unsupported') : !available(mode) ? t('unavailable') : t(mode === 'edit' ? 'editing' : 'anchored', { turn: native.split(':')[0] }), onClick: () => create(mode) }, t(mode))), error && h('span', { role: 'alert', className: 'sb-error' }, errorText(error), ' ', requiresNewRequest(error) ? h(React.Fragment, null, h('span', null, t('newRequestHelp')), ' ', h(Button, { disabled: busy, onClick: startAnother }, t('newRequest'))) : h(Button, { disabled: busy, onClick: () => create(modeFailed) }, t('retry'))))
     }
+    function promptText(node) { return (node.data.content ?? EMPTY).filter((part) => part.type === 'text').map((part) => part.text).join('\n') }
+    function userRequest(node, sessionId, native, intent) {
+      return { sourceSessionId: sessionId, mode: intent === 'fork' ? 'continue' : 'edit', turn: Number(native.split(':')[0]), expectedPromptMessageId: node.id, intent }
+    }
+    async function submitEditedPrompt(ctx, runtime, request, text, { attachments = false } = {}) {
+      const branch = await runtime.create(request)
+      const reference = ctx.sessions.retain(branch.sessionId, { source: 'sidebarChat' })
+      try {
+        await reference.ready
+        const binding = reference.binding
+        if (attachments) {
+          const outcome = ctx.conversation.input.requestDraftInitialization(binding, { prompt: text, whenDraftExists: 'keep' })
+          if (outcome === 'blocked') throw new Error('The edited version’s composer is temporarily unavailable. Retry to continue.')
+        } else {
+          const result = await binding.session.prompt([{ type: 'text', text }], 'queue', undefined, `side-branch-revise:${branch.sessionId}`)
+          if (!result.ok) throw result.error
+        }
+        return branch
+      } finally { reference.release() }
+    }
+    function PromptEditor({ node, sessionId, native, ctx, runtime, t, openMain, sidebarSessionId, onCancel }) {
+      const [text, setText] = React.useState(() => promptText(node))
+      const [busy, setBusy] = React.useState(false)
+      const [error, setError] = React.useState(null)
+      const pending = React.useRef(false)
+      const frozen = React.useRef(null)
+      const [editId] = React.useState(() => globalThis.crypto.randomUUID())
+      const attachments = (node.data.content ?? EMPTY).some((part) => part.type !== 'text')
+      const save = async () => {
+        if (pending.current || !text.trim()) return
+        const request = { ...userRequest(node, sessionId, native, 'revise'), editId }
+        // Keep the same text and request after an uncertain submission result.
+        frozen.current ??= text
+        pending.current = true; setBusy(true); setError(null)
+        const owner = sidebarSessionId()
+        try {
+          const branch = await submitEditedPrompt(ctx, runtime, request, frozen.current, { attachments })
+          if (sidebarSessionId() === owner) { openMain(branch.sessionId); runtime.createdOpened(request); onCancel() }
+          else runtime.record(branch, { pendingOpen: true, ownerSessionId: owner })
+        } catch (failure) { setError(failure) } finally { pending.current = false; setBusy(false) }
+      }
+      return h('section', { className: 'sb-prompt-editor', 'aria-label': t('editPrompt') },
+        h('textarea', { className: 'sb-field', rows: 5, autoFocus: true, value: text, disabled: busy || frozen.current !== null, 'aria-label': t('editPrompt'), onChange: (event) => setText(event.target.value), onKeyDown: (event) => { if (event.key === 'Escape' && !busy) onCancel() } }),
+        h('p', { className: 'sb-muted' }, t('revisionHelp')),
+        attachments && h('p', { className: 'sb-muted' }, t('editAttachments')),
+        h('div', { className: 'sb-row' }, h(Button, { disabled: busy || !text.trim(), onClick: save }, t(busy ? 'creating' : attachments ? 'prepareEdit' : 'saveEdit')), h(Button, { disabled: busy, onClick: onCancel }, t('cancel'))),
+        h(ErrorView, { error, t, busy, retry: save }))
+    }
+    function UserActions({ node, sessionId, useChat, useAccess, runtime, t, nativeAvailable, openBranch, sidebarSessionId, onEdit }) {
+      const native = useChat((snapshot) => nativeUserTurnState(snapshot, node))
+      const allowed = useAccess('session/fork')
+      const [busy, setBusy] = React.useState(false)
+      const pending = React.useRef(false)
+      const [error, setError] = React.useState(null)
+      const available = allowed && nativeAvailable && native.endsWith(':ready')
+      const forkReady = useChat((snapshot) => {
+        if (!native || !snapshot?.locations?.getTurn || !snapshot?.nodes?.get) return false
+        const tail = snapshot.locations.getTurn(Number(native.split(':')[0])).map((key) => snapshot.nodes.get(key)).find((item) => item?.kind === 'turn-tail')
+        const messageId = tail?.data?.closing?.finalNode?.messageId
+        return !!messageId && nativeTurnState(snapshot, messageId).endsWith(':ready')
+      })
+      const request = userRequest(node, sessionId, native, 'fork')
+      const create = async () => {
+        if (!available || !forkReady || pending.current) return
+        const ownerSessionId = sidebarSessionId()
+        pending.current = true; setBusy(true); setError(null)
+        try { const branch = await runtime.create(request); if (openBranch(branch, ownerSessionId)) runtime.createdOpened(request) }
+        catch (failure) { setError(failure) } finally { pending.current = false; setBusy(false) }
+      }
+      const startAnother = () => {
+        if (!requiresNewRequest(error) || pending.current) return
+        runtime.newRequest(request); void create()
+      }
+      if (!native) return null
+      return h('span', { className: 'sb-user-actions', 'data-busy': busy },
+        h('button', { type: 'button', className: 'sb-action', disabled: busy || !available, title: !nativeAvailable ? t('unsupported') : !available ? t('userUnavailable') : t('editPromptHint'), onClick: () => onEdit(native) }, t('editPrompt')),
+        h('button', { type: 'button', className: 'sb-action', disabled: busy || !available || !forkReady, 'aria-busy': busy, title: !nativeAvailable ? t('unsupported') : !available || !forkReady ? t('unavailable') : t('forkPromptHint'), onClick: create }, t(busy ? 'creating' : 'forkPrompt')),
+        error && h('div', { className: 'sb-user-error' }, h(ErrorView, { error, t, busy, retry: create, newRequest: requiresNewRequest(error) ? startAnother : undefined })))
+    }
+    /** Compose the native action row through extraActions, preserving Copy. */
+    function registerUserActions(ctx, props) {
+      const slot = 'conversation.chat.node'
+      const id = `${TYPE}.user-actions`
+      let previous
+      let unregister
+      let disposed = false
+      function reconcile() {
+        if (disposed) return
+        const original = ctx.slots.entries(slot).find((entry) => entry.options.key === 'user' && entry.options.id !== id)
+        if (original === previous) return
+        previous = original
+        unregister?.(); unregister = undefined
+        if (!original) return
+        const NativeUser = original.component
+        const renderNative = NativeUser?.$$typeof === Symbol.for('react.memo') && typeof NativeUser.type === 'function' ? NativeUser.type : null
+        function UserMessage(nativeProps) {
+          const [editing, setEditing] = React.useState('')
+          const [selectedId, setSelectedId] = React.useState(nativeProps.node.id)
+          if (selectedId !== nativeProps.node.id) { setSelectedId(nativeProps.node.id); setEditing('') }
+          // DSH's native renderer supplies the bubble and Copy action unchanged.
+          const bubble = renderNative ? renderNative(nativeProps) : null
+          if (!React.isValidElement(bubble) || typeof bubble.props.actions !== 'function') return h(NativeUser, nativeProps)
+          if (editing) return h(React.Fragment, null, h(Style), h(PromptEditor, { ...nativeProps, ...props, ctx, native: editing, onCancel: () => setEditing('') }))
+          const actions = bubble.props.actions
+          return h(React.Fragment, null, h(Style), React.cloneElement(bubble, { actions: (text) => {
+            const row = actions(text)
+            if (!React.isValidElement(row)) return row
+            return React.cloneElement(row, { extraActions: h(React.Fragment, null, row.props.extraActions, h(UserActions, { ...nativeProps, ...props, onEdit: setEditing })) })
+          } }))
+        }
+        unregister = ctx.slots.register({ name: slot, ...original.options, id, locale: original.locale, inject: original.inject, priority: (original.options.priority ?? 0) - 1 }, UserMessage)
+      }
+      const unsubscribe = ctx.slots.subscribe(slot, reconcile)
+      reconcile()
+      return () => { disposed = true; unsubscribe(); unregister?.() }
+    }
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), '[side-branch] locale')
       const t = ctx.locale.bind(NS)
@@ -455,14 +600,15 @@ window.__ModuleLoader__.load({
       ctx.effect(() => () => runtime.dispose(), '[side-branch] lifetime')
       ctx.effect(() => ctx.resources.register(branchResourceProvider(ctx, api)), '[side-branch] native resources')
       ctx.effect(() => ctx.sidebarRightTabs.register({ id: TYPE, kind: KIND, priority: 'extension', patterns: [`${PREFIX}**`], canOpen: (address) => parseBranchAddress(address) !== null,
-        title: (address) => { const branch = parseBranchAddress(address); return branch ? t(branch.mode === 'edit' ? 'editTitle' : 'turnTitle', { turn: branch.turn }) : t('title') },
+        title: (address) => { const branch = parseBranchAddress(address); return branch ? t(branch.intent === 'fork' ? 'forkTitle' : branch.mode === 'edit' ? 'editTitle' : 'turnTitle', { turn: branch.turn }) : t('title') },
         guide: [{ id: KIND, order: 20, title: () => t('title'), description: () => t('guide') }], keepMounted: true, multiple: true }), '[side-branch] tab type')
       ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: TYPE, locale: NS, children: { [SLOT]: { kind: 'single', scope: 'session' } }, inject: () => ({ runtime, t, nativeAvailable, openMain }) }, BranchBody)), '[side-branch] tab body')
       ctx.effect(() => ctx.slots.inject(SLOT, () => ctx.slots.register({ name: SLOT, locale: NS, inject: () => ({ runtime, t, openMain }) }, NativeConversation)), '[side-branch] child conversation')
       ctx.effect(() => ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({ name: 'conversation.chat.assistant-actions', id: TYPE, order: 40, locale: NS, inject: () => ({ runtime, t, nativeAvailable, openBranch, sidebarSessionId }) }, AssistantActions)), '[side-branch] per-turn actions')
+      ctx.effect(() => ctx.slots.inject('conversation.chat.node', () => registerUserActions(ctx, { runtime, t, nativeAvailable, openBranch, openMain, sidebarSessionId })), '[side-branch] user message actions')
       ctx.effect(() => ctx.sidebarRight.registerCloseHandler(KIND, (ownerSessionId, tab) => { runtime.closeFromTab(tab.contentId, ownerSessionId) }), '[side-branch] recoverable close')
     }
     return { name: TYPE, inject: ['slots', 'sidebarRight', 'sidebarRightTabs', 'resources', 'sessions', 'conversation', 'uiWorkspace', 'locale', 'connection'], apply,
-      branchAddress, parseBranchAddress, retryBranchAddress, nativeCapabilities, requiresNewRequest, createApi, nativeTurnState, eligible, preview, createRuntime, branchResourceProvider, ZH, EN, CSS, STORAGE_KEY }
+      branchAddress, parseBranchAddress, retryBranchAddress, nativeCapabilities, requiresNewRequest, createApi, nativeTurnState, nativeUserTurnState, registerUserActions, UserActions, eligible, preview, createRuntime, branchResourceProvider, ZH, EN, CSS, STORAGE_KEY }
   }
 })

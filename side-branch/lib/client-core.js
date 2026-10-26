@@ -18,6 +18,6 @@ export const client = registration.factory((id) => {
   return Object.freeze({})
 })
 export const {
-  branchAddress, parseBranchAddress, retryBranchAddress, nativeCapabilities, requiresNewRequest, createApi, nativeTurnState, eligible, preview,
+  branchAddress, parseBranchAddress, retryBranchAddress, nativeCapabilities, requiresNewRequest, createApi, nativeTurnState, nativeUserTurnState, registerUserActions, UserActions, eligible, preview,
   createRuntime, branchResourceProvider, ZH, EN, CSS, STORAGE_KEY,
 } = client

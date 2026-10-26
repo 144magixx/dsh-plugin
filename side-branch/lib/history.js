@@ -57,11 +57,15 @@ export function resolveAnchor(events, args) {
   let selected;
   if (args.messageId !== undefined) {
     requiredString(args.messageId, 'messageId');
-    selected = turns.find(t => t.messageIds.includes(args.messageId));
+    selected = turns.find(t => t.messageIds.includes(args.messageId) || args.mode === 'edit' && t.promptMessage === args.messageId);
     if (args.turn !== undefined && selected?.turn !== args.turn) throw new BranchError('anchor-mismatch', 'The message no longer identifies the requested turn.');
   } else {
     if (!Number.isSafeInteger(args.turn)) throw new BranchError('invalid-turn', 'Choose a recorded turn.');
     selected = turns.find(t => t.turn === args.turn);
+  }
+  if (args.expectedPromptMessageId !== undefined) {
+    requiredString(args.expectedPromptMessageId, 'expectedPromptMessageId');
+    if (selected?.promptMessage !== args.expectedPromptMessageId) throw new BranchError('anchor-mismatch', 'The selected turn does not contain this original user prompt.');
   }
   if (!selected || selected.endSeq === null) throw new BranchError('anchor-unavailable', 'Select a completed turn.');
   if (args.mode === 'continue' && !selected.branchable) throw new BranchError('anchor-unavailable', 'This turn has no final reply or has later tool/error activity.');
@@ -73,7 +77,8 @@ export function resolveAnchor(events, args) {
   const atSeq = previous?.endSeq ?? null;
   if (previous && atSeq === null) throw new BranchError('anchor-unavailable', 'The preceding turn is incomplete.');
   if (atSeq !== null && (events[atSeq]?.seq !== atSeq || events[atSeq]?.type !== 'turn/end')) throw new BranchError('invalid-history', 'The recorded turn boundary is inconsistent.');
-  return { sourceSessionId, mode: args.mode, turn: selected.turn, atSeq,
+  if (args.intent !== undefined && !['fork', 'revise'].includes(args.intent)) throw new BranchError('invalid-intent', 'Unknown prompt action.');
+  return { sourceSessionId, mode: args.mode, turn: selected.turn, atSeq, ...(args.intent ? { intent: args.intent } : {}),
     originalPrompt: args.mode === 'edit' ? selected.originalPrompt : '', attachmentCount: args.mode === 'edit' ? selected.attachmentCount : 0,
     totalTurns: turns.filter(t => t.endSeq !== null).length,
     inheritedTurns: args.mode === 'continue' ? index + 1 : index,
