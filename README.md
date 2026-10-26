@@ -11,6 +11,7 @@
 | **岔路 · Side Branch** | [side-branch](side-branch/README.md) | 从历史轮次继续，或修改历史提问，在侧栏使用完整原生会话 | `dsh-side-branch` |
 | **会话摘要悬浮框 · Session Summary** | [session-summary](session-summary/README.md) | 在对话右上角弹出可固定的摘要卡片：改动、子智能体、来源、计划、生成文件、后台任务、关联会话 | `dsh-session-summary` |
 | **会话搜索 · Session Search** | [session-search](session-search/README.md) | Cmd/Ctrl+F 搜索当前会话，Cmd/Ctrl+Shift+F 搜索会话标题与跨会话正文 | `dsh-session-search` |
+| **会话导航 · Session Navigator** | [session-navigator](session-navigator/README.md) | 稳定标题配合最近话题、后台 Luna 摘要、悬停详情与最近访问，快速找回会话 | `dsh-session-navigator` |
 
 ## 获取代码
 
@@ -106,3 +107,4 @@ dsh-plugin/
 - 岔路：[使用指南](side-branch/docs/使用指南.md)、[README](side-branch/README.md)
 - 会话摘要：[使用文档](session-summary/docs/使用文档.md)、[README](session-summary/README.md)
 - 会话搜索：[README](session-search/README.md)、[验收记录](session-search/docs/验收记录.md)
+- 会话导航：[README](session-navigator/README.md)、[使用指南](session-navigator/docs/使用指南.md)

@@ -1,0 +1,11 @@
+- insert:
+    - id: session-navigator
+      name: dsh-session-navigator
+      config:
+        provider: codex-relay
+        model: gpt-6-luna
+        autoSummarize: true
+        debounceMs: 1200
+        timeoutMs: 20000
+        concurrency: 2
+        initialSummaries: 12
