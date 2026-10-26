@@ -53,7 +53,7 @@
     ], total: 4, added: 321, deleted: 6 },
   }
   const api = client.createApi({ get: (name) => services[name] }, {
-    storage: undefined,
+    storage: params.get('persist') === 'yes' ? localStorage : undefined,
     fetchImpl: async (url) => {
       const seq = Number(new URL(url, 'http://x/').searchParams.get('seq'))
       if (seq === 31) return { status: 404, ok: false }
@@ -101,15 +101,18 @@
     useChat: (select) => select(snapshot),
     useProjection: (key) => projections[key],
   }
-  if (params.get('open') !== 'no') api.prefs.set({ pinned: mode !== 'selftest' })
-  if (mode === 'selftest') api.open(sessionId)
+  if (params.get('open') === 'no') api.close()
+  window.__summaryPreview = { api, client }
 
   function Page() {
+    const [activeSession, setActiveSession] = React.useState(sessionId)
+    window.__summaryPreview.switchSession = setActiveSession
+    const activeHooks = activeSession === sessionId ? hooks : { ...hooks, useChat: select => select(null), useProjection: () => null }
     return h('div', { className: 'pv-frame' },
       h('div', { className: 'pv-column' },
         h('header', { className: 'pv-header' },
           h('div', { className: 'pv-title' }, '评估并统一禁忌搜索结果'),
-          h('div', { className: 'pv-utilities' }, h('span', { className: 'pv-native' }, '⋯'), h(client.SummaryToggle, { sessionId, api, t, ...hooks })),
+          h('div', { className: 'pv-utilities' }, h('span', { className: 'pv-native' }, '⋯'), h(client.SummaryToggle, { sessionId: activeSession, api, t, ...activeHooks })),
           h('div', { className: 'pv-corner' })),
         h('div', { className: 'pv-transcript' },
           h('div', { className: 'pv-bubble' }, '评估一下纯禁忌搜索（非贪心+禁忌搜索）的指标和性能，把相关结果统一到项目所有文档（报告、ppt、网页等）有关的地方，并要标明纯禁忌搜索和贪心+禁忌搜索。'),
@@ -143,7 +146,7 @@
     const check = (name, ok, detail) => results.push((ok ? 'PASS ' : 'FAIL ') + name + (detail ? ' :: ' + detail : ''))
     const card = () => document.querySelector('[data-dsh-session-summary]')
     await wait(700)
-    check('card opens from toggle state', !!card())
+    check('card opens and pins by default', !!card() && api.prefs.getSnapshot().pinned === true)
     const text = card()?.textContent ?? ''
     check('project name', text.includes('paper'))
     check('changes merged', text.includes('+517') && text.includes('−6'), text.match(/[+−]\d+/g)?.slice(0, 4).join(' '))
@@ -182,6 +185,7 @@
     card().querySelector('[data-section="sources"] .dss-sec-head').click(); await wait(50)
     check('section collapses and is remembered', !card().querySelector('[data-section="sources"] .dss-row') && api.prefs.getSnapshot().collapsed.sources === true)
     card().querySelector('[data-section="sources"] .dss-sec-head').click(); await wait(50)
+    card().querySelector('[data-dss-pin]').click(); await wait(50)
     document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
     await wait(50)
     check('outside press closes unpinned card', !card())

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Session Summary",
-    "description": "A pinnable summary card at the conversation's top-right: changes, subagents, sources, plan, generated files, background jobs and related sessions, each opening the native view."
+    "description": "A draggable summary card, open and pinned by default, at the conversation's top-right: changes, subagents, sources, plan, generated files, background jobs and related sessions, each opening the native view."
   }
 }
