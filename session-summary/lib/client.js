@@ -615,18 +615,25 @@ window.__ModuleLoader__.load({
       const maxHeight = Math.max(40, Math.min(viewport.height - top - (layout === 'stack' ? 160 : 24), viewport.height * (layout === 'stack' ? 0.45 : 0.72)))
       return { right, top, width, maxHeight, layout }
     }
+    /** Optional companion plugins reserve space below the summary, never inside its scroller. */
+    function summaryAccessoryHeight() {
+      if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return 0
+      const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dsh-summary-accessory-height'))
+      return Number.isFinite(value) ? clamp(value, 0, 96) : 0
+    }
     /** Viewport coordinates, independent of the overlay's containing block. */
-    function cardPlacement(anchor, position, viewport, measuredHeight) {
+    function cardPlacement(anchor, position, viewport, measuredHeight, reservedHeight = 0) {
       const margin = 12
       const width = Math.max(1, Math.min(anchor.width, viewport.width - margin * 2))
       const docked = !position && anchor.layout && anchor.layout !== 'floating'
-      const maxHeight = Math.max(1, Math.min(anchor.maxHeight, viewport.height - margin * 2, docked ? viewport.height - anchor.top - margin : Infinity))
+      const reserve = Number.isFinite(reservedHeight) ? clamp(reservedHeight, 0, Math.max(0, viewport.height - margin * 2 - 40)) : 0
+      const maxHeight = Math.max(1, Math.min(anchor.maxHeight, viewport.height - margin * 2, docked ? viewport.height - anchor.top - margin : Infinity) - reserve)
       const height = Math.min(measuredHeight ?? maxHeight, maxHeight)
       const left = position?.left ?? anchor.right - width
       const top = position?.top ?? anchor.top
       return {
         left: clamp(left, margin, Math.max(margin, viewport.width - width - margin)),
-        top: docked ? top : clamp(top, margin, Math.max(margin, viewport.height - height - margin)),
+        top: clamp(top, margin, Math.max(margin, viewport.height - height - margin - reserve)),
         width, maxHeight
       }
     }
@@ -1144,7 +1151,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
           if (content && anchor.layout !== 'floating') {
             content.classList.add('dss-conversation-layout')
             content.style.setProperty('--dss-side-space', `${anchor.layout === 'side' ? anchor.width + 24 : 0}px`)
-            content.style.setProperty('--dss-top-space', `${anchor.layout === 'stack' ? Math.min(cardHeightRef.current, anchor.maxHeight) + 20 : 0}px`)
+            content.style.setProperty('--dss-top-space', `${anchor.layout === 'stack' ? Math.min(cardHeightRef.current, anchor.maxHeight) + summaryAccessoryHeight() + 20 : 0}px`)
           } else clearSpace()
           api.publishAnchor(sessionId, anchor)
         }
@@ -1155,7 +1162,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
         observer?.observe(header)
         window.addEventListener('resize', schedule)
-        return () => { observer?.disconnect(); cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); placeRef.current = null; clearSpace() }
+        window.addEventListener('dsh:summary-accessory-change', schedule)
+        return () => { observer?.disconnect(); cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); window.removeEventListener('dsh:summary-accessory-change', schedule); placeRef.current = null; clearSpace() }
       }, [api, sessionId, anchorElement, floating])
       return null
     }
@@ -1202,13 +1210,13 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const [offset, setOffset] = React.useState({ x: 0, y: 0 })
       const close = React.useCallback(() => api.close(), [api])
 
-      const [viewport, setViewport] = React.useState(() => ({ width: window.innerWidth, height: window.innerHeight }))
+      const [viewport, setViewport] = React.useState(() => ({ width: window.innerWidth, height: window.innerHeight, reservedHeight: summaryAccessoryHeight() }))
       const [measuredHeight, setMeasuredHeight] = React.useState(null)
       const [dragPosition, setDragPosition] = React.useState(null)
       const dragRef = React.useRef(null)
-      const placement = anchor ? cardPlacement(anchor, dragPosition ?? (prefs.floating ? prefs.position : null), viewport, measuredHeight) : null
+      const placement = anchor ? cardPlacement(anchor, dragPosition ?? (prefs.floating ? prefs.position : null), viewport, measuredHeight, viewport.reservedHeight) : null
       React.useLayoutEffect(() => {
-        const resize = () => setViewport({ width: window.innerWidth, height: window.innerHeight })
+        const resize = () => setViewport({ width: window.innerWidth, height: window.innerHeight, reservedHeight: summaryAccessoryHeight() })
         const measure = () => { if (cardRef.current) { const height = cardRef.current.getBoundingClientRect().height; setMeasuredHeight(height); api.ui.set({ cardHeight: height }) } }
         measure()
         let frame = 0
@@ -1216,7 +1224,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
         if (cardRef.current) observer?.observe(cardRef.current)
         window.addEventListener('resize', resize)
-        return () => { observer?.disconnect(); cancelAnimationFrame(frame); window.removeEventListener('resize', resize) }
+        window.addEventListener('dsh:summary-accessory-change', resize)
+        return () => { observer?.disconnect(); cancelAnimationFrame(frame); window.removeEventListener('resize', resize); window.removeEventListener('dsh:summary-accessory-change', resize) }
       }, [])
       // Keep containing-block compensation separate from the user's viewport position.
       React.useLayoutEffect(() => {
@@ -1239,7 +1248,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
             if (next.pointerId !== pointerId) return
             const dx = next.clientX - startX, dy = next.clientY - startY
             if (!drag.last && Math.hypot(dx, dy) < 3) return
-            const box = cardPlacement(anchor, { left: rect.left + dx, top: rect.top + dy }, { width: window.innerWidth, height: window.innerHeight }, rect.height)
+            const box = cardPlacement(anchor, { left: rect.left + dx, top: rect.top + dy }, { width: window.innerWidth, height: window.innerHeight }, rect.height, summaryAccessoryHeight())
             drag.last = { left: box.left, top: box.top }
             setDragPosition(drag.last)
           }
@@ -1278,7 +1287,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
           if (!direction || !placement) return
           event.preventDefault()
           const step = event.shiftKey ? 64 : 16
-          const box = cardPlacement(anchor, { left: placement.left + direction[0] * step, top: placement.top + direction[1] * step }, viewport, measuredHeight)
+          const box = cardPlacement(anchor, { left: placement.left + direction[0] * step, top: placement.top + direction[1] * step }, viewport, measuredHeight, viewport.reservedHeight)
           api.setPosition({ left: box.left, top: box.top })
         }
       }

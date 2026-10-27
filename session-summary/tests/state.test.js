@@ -231,6 +231,17 @@ test('card placement keeps dragged, anchored and resized cards inside the viewpo
 });
 
 
+test('companion controls keep reserved space below long, docked and dragged summaries', () => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 760, height: 480 }, { width: 320, height: 190 }]) {
+    const anchor = summaryLayout({ width: viewport.width, right: viewport.width, bottom: 60 }, viewport, false);
+    for (const position of [null, { left: 9999, top: 9999 }, { left: -99, top: -99 }]) {
+      const box = cardPlacement(anchor, position, viewport, 10000, 48);
+      assert.ok(box.top + box.maxHeight + 48 <= viewport.height - 12, JSON.stringify({ viewport, box }));
+      assert.ok(box.top >= 12 && box.maxHeight >= 1);
+    }
+  }
+});
+
 test('default layout reserves a side column or a narrow-window summary row', () => {
   const viewport = { width: 1440, height: 900 };
   const side = summaryLayout({ width: 1200, right: 1440, bottom: 76 }, viewport, false);

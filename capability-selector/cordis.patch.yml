@@ -1,0 +1,4 @@
+- insert:
+    - id: capability-selector
+      name: dsh-capability-selector
+      config: {}
