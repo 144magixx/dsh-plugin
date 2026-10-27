@@ -2,7 +2,7 @@
 
 此仓库用于开发和存放多个独立的 DSH（DeepSeek Harness）插件。每个插件放在自己的子目录中，分别维护代码、清单、文档、测试和安装包。
 
-插件是纯 JavaScript，零运行时依赖、无需构建，**Windows 和 macOS** 上的 DSH Desktop / Web GUI 均可使用。
+插件是纯 JavaScript，零运行时依赖、无需构建，面向 **Windows 和 macOS** 的 DSH Desktop / Web GUI；各插件实际能力与平台验证范围以其 README 和验收记录为准。
 
 ## 插件列表
 
@@ -12,6 +12,7 @@
 | **会话摘要悬浮框 · Session Summary** | [session-summary](session-summary/README.md) | 在对话右上角弹出可固定的摘要卡片：改动、子智能体、来源、计划、生成文件、后台任务、关联会话 | `dsh-session-summary` |
 | **会话搜索 · Session Search** | [session-search](session-search/README.md) | Cmd/Ctrl+F 搜索当前会话，Cmd/Ctrl+Shift+F 搜索会话标题与跨会话正文 | `dsh-session-search` |
 | **外部能力 · Capability Selector** | [capability-selector](capability-selector/README.md) | 发现并去重本机 Skills、企业 CLI 与 MCP，选择本次任务的能力；入口位于摘要下方 | `dsh-capability-selector` |
+| **任务守护 · Task Guardian** | [task-guardian](task-guardian/README.md) | 原生重试耗尽后的临时故障守护、恢复审查和问题倒计时；自动恢复与作答保持人工确认 | `dsh-task-guardian` |
 | **会话导航 · Session Navigator** | [session-navigator](session-navigator/README.md) | 稳定标题配合最近话题、后台 Luna 摘要、悬停详情与最近访问，快速找回会话 | `dsh-session-navigator` |
 
 ## 获取代码

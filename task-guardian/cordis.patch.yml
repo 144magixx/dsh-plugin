@@ -1,0 +1,4 @@
+- insert:
+    - id: task-guardian
+      name: dsh-task-guardian
+      config: {}
