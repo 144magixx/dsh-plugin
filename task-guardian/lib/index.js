@@ -59,19 +59,23 @@ export function createGuardianService(ctx, { now = Date.now, leaseFactory = acqu
       if (disposed) return;
       retries = registerRetryMiddleware(ctx, {
         ...retryOptions, lifetimeSignal: lifetime.signal, now, isEnabled: enabled,
-        async onSchedule({ sessionId, attempt, retryAt, delayMs, reason, payload, signal }) {
+        async onSchedule({ sessionId, attempt, retryAt, delayMs, reason, payload, signal, failure: requestFailure, handoff, nativeRetryCount, maxRetries }) {
           // Durable record first; both the retry helper and this queued writer recheck revocation.
           await store.update(sessionId, 'retry_scheduled', current => {
             if (signal.aborted || !enabled(sessionId)) return undefined;
-            return { ...current, retry: { attempt, retryAt, delayMs, reason }, run: { ...current.run, phase: 'waiting', ownerId, turn: payload.turn, step: payload.step, lastSeq: payload.agent.session.seq - 1 } };
+            const lastDecision = { kind: 'scheduled', reason, code: requestFailure?.code ?? null, at: now(), turn: payload.turn, step: payload.step, handoff: handoff ?? null, nativeRetryCount: nativeRetryCount ?? null, maxRetries: maxRetries ?? null };
+            return { ...current, lastDecision, retry: { attempt, retryAt, delayMs, reason }, run: { ...current.run, phase: 'waiting', ownerId, turn: payload.turn, step: payload.step, lastSeq: payload.agent.session.seq - 1 } };
           });
         },
         async onReset({ sessionId }) {
           if (!store?.healthy() || disposed) return;
           await store.update(sessionId, 'retry_cleared', current => current.retry.attempt || current.retry.retryAt !== null ? { ...current, retry: { attempt: 0, retryAt: null } } : undefined);
         },
-        async onBlocked({ sessionId, kind, reason, signal }) {
-          await store.update(sessionId, 'retry_refused', current => !signal.aborted && enabled(sessionId) ? { ...current, retry: { ...current.retry, retryAt: null, reason: `${kind}:${reason}` } } : undefined);
+        async onBlocked({ sessionId, kind, reason, signal, payload, failure: requestFailure, handoff, nativeRetryCount, maxRetries }) {
+          await store.update(sessionId, 'retry_refused', current => !signal.aborted && enabled(sessionId) ? { ...current,
+            lastDecision: { kind, reason, code: requestFailure?.code ?? null, at: now(), turn: payload?.turn ?? null, step: payload?.step ?? null, handoff: handoff ?? null, nativeRetryCount: nativeRetryCount ?? null, maxRetries: maxRetries ?? null },
+            retry: { ...current.retry, retryAt: null, reason: `${kind}:${reason}` },
+          } : undefined);
         },
       });
       // Only inspect explicitly opted-in records. Never activate agents or submit prompts.
@@ -96,11 +100,17 @@ export function createGuardianService(ctx, { now = Date.now, leaseFactory = acqu
     const stateFault = fault || (store && !store.healthy() ? 'persistence_unavailable' : null);
     if (stateFault) return { ok: true, sessionId: id, record, questions: [], compatibility, fault: stateFault, startup: { supported: false, enabled: false }, serverNow: now() };
     return observe(id, async observed => {
-      const questions = questionViews(observed.projections?.values[QUESTIONS], record.settings, now());
+      const projections = observed.projections?.values;
+      const lifecycle = projections?.[LIFE];
+      const questions = questionViews(projections?.[QUESTIONS], record.settings, now());
+      const ended = lifecycle?.turn === null ? lifecycle.lastTurnEnd : null;
+      const firstGrant = record.settings.enabled && record.epoch === 1 ? record.audit.find(entry => entry.kind === 'user_settings_changed') : undefined;
+      const guardEnabledAt = record.guardEnabledAt ?? firstGrant?.at ?? null;
+      const lastFailure = ended?.reason?.kind === 'error' ? { at: ended.time, code: ended.reason.error?.code ?? null, guardEnabledAt, beforeGuardEnabled: Number.isFinite(guardEnabledAt) && ended.time < guardEnabledAt } : null;
       const startup = store.getStartup();
       let startupSupported = false;
       try { buildStartupPlan(); startupSupported = true; } catch { /* no supported Desktop executable */ }
-      return { ok: true, sessionId: id, record, questions, compatibility, fault, startup: { ...startup, supported: startupSupported }, serverNow: now() };
+      return { ok: true, sessionId: id, record, questions, lastFailure, compatibility, fault, startup: { ...startup, supported: startupSupported }, serverNow: now() };
     }, signal);
   }
   async function configure(input, signal) {
@@ -118,6 +128,9 @@ export function createGuardianService(ctx, { now = Date.now, leaseFactory = acqu
         if (current.epoch !== input.epoch) throw failure('settings_changed_reload', 409);
         const settings = { ...current.settings, ...patch };
         return { ...current, settings, epoch: current.epoch + 1,
+          ...(patch.enabled === true && !current.settings.enabled ? { guardEnabledAt: now() } : {}),
+          ...(patch.enabled === false ? { guardEnabledAt: null } : {}),
+          ...(patch.enabled !== undefined ? { lastDecision: null } : {}),
           recovery: settings.enabled && settings.recoverAfterRestart ? { status: 'need_confirmation', reasonCode: 'safe_recovery_adapter_unavailable', reason: '已记录事前恢复偏好；当前版本仍需人工确认停止、工具结果及原生目标授权。' } : { status: 'disabled', reasonCode: 'recovery_disabled', reason: '未启用重启恢复。' },
           ...(settings.enabled ? {} : { retry: { ...current.retry, retryAt: null }, run: { ...current.run, phase: 'idle' } }),
         };
@@ -157,7 +170,7 @@ export function createGuardianService(ctx, { now = Date.now, leaseFactory = acqu
     const config = await next();
     if (!enabled(payload.agent.id)) return config;
     try {
-      await store.update(payload.agent.id, 'request_observed', current => current.settings.enabled ? { ...current, run: { ...current.run, phase: 'running', ownerId, turn: payload.turn, step: payload.step, lastSeq: payload.agent.session.seq - 1 }, retry: { ...current.retry, retryAt: null } } : undefined);
+      await store.update(payload.agent.id, 'request_observed', current => current.settings.enabled ? { ...current, lastDecision: null, run: { ...current.run, phase: 'running', ownerId, turn: payload.turn, step: payload.step, lastSeq: payload.agent.session.seq - 1 }, retry: { ...current.retry, retryAt: null } } : undefined);
     } catch (error) { fail(error); }
     payload.signal.throwIfAborted();
     return config;

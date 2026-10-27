@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getEventListeners } from 'node:events';
 import {
   NATIVE_RETRY_COMPATIBILITY, parseRetryAfter, classifyFailure, computeBackoffMs,
-  abortableWait, nativeExhausted, registerRetryMiddleware,
+  abortableWait, nativeExhausted, nativeRetryDisposition, registerRetryMiddleware,
 } from '../lib/retry.js';
 
 // Use the installed app's extracted packages; never install packages or access
@@ -170,6 +170,81 @@ test('generic transport failures stop while concrete reset and stream idle timeo
   }
 });
 
+test('generic PI failures accept only explicit provider overload evidence with permanent precedence', () => {
+  const exact = 'server_error: Our servers are currently overloaded. Please try again later.';
+  const accepted = [exact,
+    'server_error: Our servers are temporarily overloaded. Please try again later.',
+    'server_error: Our server is currently overloaded. Please try again later.',
+    'server_error: The service is temporarily overloaded. Please try again later.',
+    'server_error: temporarily overloaded. Please try again later.',
+    JSON.stringify({ error: { type: 'overloaded_error', message: 'Provider capacity exhausted' } }),
+    'Provider replied: ' + JSON.stringify({ error: { detail: { code: 'overloaded_error' } } }),
+  ];
+  for (const message of accepted) {
+    const result = classifyFailure({ code: 'PI_AI_ERROR', message });
+    assert.equal(result.kind, 'transient', message);
+    assert.equal(result.reason, 'server-overloaded', message);
+  }
+  for (const message of ['PI_AI_ERROR something went wrong', 'something went wrong',
+    'server_error: Something went wrong', 'server_error', 'internal_error',
+    'internal_error: Our servers are currently overloaded. Please try again later.',
+    'Our servers are currently overloaded. Please try again later.',
+    'server_error: Our servers are not overloaded.', 'server_error: temporarily unavailable.',
+    'server_error: overload protection is disabled.']) {
+    for (const status of [undefined, 503]) assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message, status }).kind, 'unknown', message);
+  }
+  for (const [message, reason] of [
+    ['server_error: invalid api key', 'authentication'],
+    ['server_error: insufficient_quota', 'quota'],
+    [exact + ' Invalid API key.', 'authentication'],
+    [JSON.stringify({ error: { type: 'overloaded_error', inner: { code: 'insufficient_quota' } } }), 'quota'],
+  ]) {
+    const result = classifyFailure({ code: 'PI_AI_ERROR', message, status: 503 });
+    assert.equal(result.kind, 'permanent', message); assert.equal(result.reason, reason, message);
+  }
+  assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message: exact, status: 401 }).kind, 'permanent');
+  assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message: exact, status: 418 }).kind, 'unknown');
+  assert.equal(classifyFailure({ code: 'SERVER', message: 'Generic server error' }).kind, 'transient');
+});
+
+test('explicit content restrictions outrank PI overload and HTTP 503 without treating generic policy text as permanent', async t => {
+  const overload = 'server_error: Our servers are currently overloaded. Please try again later.';
+  const codes = ['CONTENT_FILTER', 'CONTENT_POLICY_VIOLATION', 'CONTENT_POLICY_ERROR', 'POLICY_VIOLATION', 'SAFETY_REFUSAL', 'SAFETY_VIOLATION', 'PROHIBITED_CONTENT'];
+  for (const code of codes) {
+    const result = classifyFailure({ code, message: overload, status: 503 });
+    assert.deepEqual(result, { kind: 'permanent', reason: 'content-restriction' }, code);
+  }
+  const explicitText = ['Content policy violation', 'Blocked by content filter', 'Safety policy violation',
+    'Request blocked by content policy', 'Request rejected due to content policy',
+    'Request refused under the content policy', 'Request blocked due to our content policy',
+    'content_policy_error', 'safety_refusal', 'Request contains prohibited content',
+    '内容审核拦截了本次请求', '请求未通过内容审核，内容审核拒绝', '内容安全策略拒绝此次请求', '请求包含违规内容'];
+  for (const message of explicitText) {
+    for (const code of ['SERVER', 'PI_AI_ERROR']) {
+      const result = classifyFailure({ code, status: 503, message: overload + ' ' + message });
+      assert.equal(result.kind, 'permanent', message); assert.equal(result.reason, 'content-restriction', message);
+    }
+  }
+  const policyBlocked = 'server_error: Our servers are currently overloaded. Request blocked by content policy.';
+  assert.deepEqual(classifyFailure({ code: 'PI_AI_ERROR', message: policyBlocked }), { kind: 'permanent', reason: 'content-restriction' });
+  const mixed = overload + ' ' + JSON.stringify({ error: { code: 'content_filter', detail: { type: 'overloaded_error' } } });
+  assert.deepEqual(classifyFailure({ code: 'PI_AI_ERROR', message: mixed, status: 503 }), { kind: 'permanent', reason: 'content-restriction' });
+  for (const message of ['The policy changed', 'Retry policy budget is exhausted', 'Request blocked by retry policy', 'Request rejected due to retry policy', 'Content filter settings were loaded', 'Content policy documentation is unavailable', '内容审核服务暂时不可用']) {
+    const result = classifyFailure({ code: 'PI_AI_ERROR', message });
+    assert.equal(result.kind, 'unknown', message); assert.notEqual(result.reason, 'content-restriction', message);
+  }
+  const host = await createHost(t);
+  for (const [index, failure] of [
+    { code: 'PI_AI_ERROR', message: mixed, status: 503 },
+    { code: 'PI_AI_ERROR', message: policyBlocked },
+    { code: 'SERVER', message: 'Content policy violation', status: 503 },
+  ].entries()) {
+    assert.equal(await host.dispatch(payloadFor(host.session(`content-restriction-${index}`), { failure, retryPolicy: policy({ maxRetries: 0 }) })), undefined);
+    assert.equal(host.blocked.at(-1).kind, 'permanent'); assert.equal(host.blocked.at(-1).reason, 'content-restriction');
+  }
+  assert.equal(host.scheduled.length, 0); assert.equal(host.waited.length, 0);
+});
+
 test('backoff follows 30/60/120/240/300 seconds and keeps jitter under five minutes', () => {
   assert.deepEqual([1, 2, 3, 4, 5, 6, 50].map(attempt => computeBackoffMs(attempt, { random: () => 0.5 })), [30_000, 60_000, 120_000, 240_000, 300_000, 300_000, 300_000]);
   assert.equal(computeBackoffMs(1, { random: () => 0 }), 27_000);
@@ -239,16 +314,73 @@ test('native exhaustion matches exact provider and sorted resolved policy keys',
   assert.equal(runtimeRequire('@deepseek-ai/dsh-llm-retry/package.json').version, '0.2.1-rc.3');
 });
 
-test('normal native early exits do not authorize guardian retry before budget exhaustion', async t => {
+test('PI overload delegated by native code filtering starts a fresh 30-second guardian chain at native count zero', async t => {
+  const host = await createHost(t);
+  const payload = payloadFor(host.session('pi-overload'), { failure: { code: 'PI_AI_ERROR', message: 'server_error: Our servers are currently overloaded. Please try again later.' } });
+  for (let index = 0; index < 3; index++) {
+    assert.deepEqual(await host.dispatch(payload), { kind: 'retry' });
+    assert.equal(nativeExhausted(host.ctx, payload), false);
+    assert.equal(nativeRetryDisposition(host.ctx, payload).nativeRetryCount, 0);
+  }
+  assert.deepEqual(host.scheduled.map(entry => entry.delayMs), [30_000, 60_000, 120_000]);
+  assert.deepEqual(host.scheduled.map(entry => entry.attempt), [1, 2, 3]);
+  assert.ok(host.scheduled.every(entry => entry.handoff === 'native-code-not-retryable' && entry.nativeRetryCount === 0 && entry.maxRetries === 2 && entry.reason === 'server-overloaded'));
+  assert.equal(host.blocked.length, 0);
+});
+
+test('PI overload still exhausts native retries first when the provider explicitly includes its code', async t => {
+  const host = await createHost(t);
+  const payload = payloadFor(host.session('native-pi'), {
+    retryPolicy: policy({ retryableCodes: ['PI_AI_ERROR'] }),
+    failure: { code: 'PI_AI_ERROR', message: 'server_error: Our servers are currently overloaded. Please try again later.' },
+  });
+  for (let index = 0; index < 2; index++) {
+    assert.deepEqual(await host.dispatch(payload), { kind: 'retry' });
+    assert.equal(host.scheduled.length, 0); assert.equal(host.blocked.length, 0);
+  }
+  assert.deepEqual(await host.dispatch(payload), { kind: 'retry' });
+  assert.equal(host.scheduled[0].handoff, 'native-budget-exhausted');
+  assert.equal(host.scheduled[0].nativeRetryCount, 2); assert.equal(host.scheduled[0].maxRetries, 2);
+});
+
+test('native code delegation never permits AUTH, QUOTA or unclassified PI/UNKNOWN errors', async t => {
+  const host = await createHost(t);
+  const cases = [
+    [{ code: 'AUTH', message: 'invalid api key' }, 'permanent'],
+    [{ code: 'QUOTA', message: 'insufficient_quota' }, 'permanent'],
+    [{ code: 'UNKNOWN', message: 'something went wrong' }, 'unknown'],
+    [{ code: 'PI_AI_ERROR', message: 'server_error: Something went wrong' }, 'unknown'],
+    [{ code: 'PI_AI_ERROR', message: 'server_error: invalid api key' }, 'permanent'],
+    [{ code: 'PI_AI_ERROR', message: 'server_error: insufficient_quota' }, 'permanent'],
+  ];
+  for (const [index, [failure, kind]] of cases.entries()) {
+    const payload = payloadFor(host.session(`excluded-permanent-${index}`), { failure });
+    assert.equal(await host.dispatch(payload), undefined);
+    assert.equal(host.blocked.at(-1).kind, kind);
+    assert.equal(host.blocked.at(-1).handoff, 'native-code-not-retryable');
+    assert.equal(host.blocked.at(-1).nativeRetryCount, 0);
+  }
+  assert.equal(host.scheduled.length, 0); assert.equal(host.waited.length, 0);
+});
+
+test('normal native explicit early delegation permits guardian recovery without claiming exhaustion', async t => {
   const host = await createHost(t);
   const session = host.session();
   const tooLong = payloadFor(session, { failure: failure({ providerRetryAfterMs: 600_000 }) });
-  assert.equal(await host.dispatch(tooLong), undefined);
+  assert.deepEqual(await host.dispatch(tooLong), { kind: 'retry' });
   assert.equal(nativeExhausted(host.ctx, tooLong), false);
-  const excludedCode = payloadFor(session, { failure: failure({ code: 'HTTP_503' }) });
-  assert.equal(await host.dispatch(excludedCode), undefined);
-  assert.equal(host.scheduled.length, 0);
-  assert.equal(host.waited.length, 0);
+  assert.deepEqual(nativeRetryDisposition(host.ctx, tooLong), { eligible: true, reason: 'native-retry-after-delegated', nativeRetryCount: 0, maxRetries: 2 });
+  assert.equal(host.scheduled[0].handoff, 'native-retry-after-delegated');
+  assert.equal(host.scheduled[0].nativeRetryCount, 0);
+  assert.equal(host.scheduled[0].maxRetries, 2);
+  assert.equal(host.scheduled[0].delayMs, 600_000);
+  const excludedCode = payloadFor(host.session('excluded'), { failure: failure({ code: 'HTTP_503' }) });
+  assert.deepEqual(await host.dispatch(excludedCode), { kind: 'retry' });
+  assert.equal(nativeExhausted(host.ctx, excludedCode), false);
+  assert.deepEqual(nativeRetryDisposition(host.ctx, excludedCode), { eligible: true, reason: 'native-code-not-retryable', nativeRetryCount: 0, maxRetries: 2 });
+  assert.equal(host.scheduled[1].handoff, 'native-code-not-retryable');
+  assert.equal(host.scheduled[1].delayMs, 30_000);
+  assert.equal(host.waited.length, 2);
 });
 
 test('disabled guardian and an absent native policy preserve downstream behavior', async t => {
@@ -490,6 +622,83 @@ test('enabled state is rechecked after waiting and reset cancels stale work', as
   await Promise.resolve();
   await host.middleware.reset(payload.agent.session.id);
   assert.equal(await stale, undefined);
+});
+
+test('native disposition keeps exhaustion strict and rejects missing or malformed current-version evidence', () => {
+  const payload = payloadFor({ id: 'native-state' });
+  const policyKey = JSON.stringify(['normal', 2, [...payload.retryPolicy.retryableCodes].sort(), 1, 1, 0]);
+  const key = JSON.stringify([payload.provider, policyKey]);
+  const context = state => ({ sessionProjections: { stateOf: () => state } });
+  assert.deepEqual(nativeRetryDisposition(context({}), payload), { eligible: false, reason: 'native-budget-remaining', nativeRetryCount: 0, maxRetries: 2 });
+  assert.deepEqual(nativeRetryDisposition(context({ [key]: { retry: 1, retryId: 'first' } }), payload), { eligible: false, reason: 'native-budget-remaining', nativeRetryCount: 1, maxRetries: 2 });
+  const exhausted = context({ [key]: { retry: 2, retryId: 'first' } });
+  assert.equal(nativeExhausted(exhausted, payload), true);
+  assert.deepEqual(nativeRetryDisposition(exhausted, payload), { eligible: true, reason: 'native-budget-exhausted', nativeRetryCount: 2, maxRetries: 2 });
+  for (const state of [undefined, null, [], new Map(), { version: 2 },
+    { [key]: { retry: 2 } }, { [key]: { retry: 2, retryId: 7 } },
+    { [key]: { retry: -1, retryId: 'bad' } }, { [key]: { retry: 2.1, retryId: 'bad' } },
+    { [key]: { retry: 2, retryId: 'future', version: 2 } }]) {
+    assert.equal(nativeExhausted(context(state), payload), false);
+    assert.deepEqual(nativeRetryDisposition(context(state), payload), { eligible: false, reason: 'native-state-unavailable', nativeRetryCount: null, maxRetries: 2 });
+  }
+  const unhandledCode = { ...payload, failure: { code: 'PI_AI_ERROR', message: 'server_error: Our servers are currently overloaded. Please try again later.' } };
+  assert.deepEqual(nativeRetryDisposition(context({}), unhandledCode), { eligible: true, reason: 'native-code-not-retryable', nativeRetryCount: 0, maxRetries: 2 });
+  assert.equal(nativeExhausted(context({}), unhandledCode), false);
+  assert.equal(nativeRetryDisposition({}, unhandledCode).reason, 'native-state-unavailable');
+  assert.equal(nativeRetryDisposition(context({}), { ...payload, retryPolicy: undefined }).reason, 'native-policy-missing');
+  assert.equal(nativeRetryDisposition(context({}), { ...payload, retryPolicy: { mode: 'always', initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 } }).reason, 'native-policy-unsupported');
+  for (const retryPolicy of [policy({ initialDelayMs: 0 }), policy({ maxDelayMs: 0 }), policy({ jitterRatio: 2 }), policy({ retryableCodes: [] }), policy({ retryableCodes: ['SERVER', 'SERVER'] })]) {
+    assert.equal(nativeRetryDisposition(context({}), { ...payload, retryPolicy }).reason, 'native-policy-invalid');
+  }
+});
+
+test('unhandled native boundaries are observed without stealing a remaining native budget', async t => {
+  const ctx = new Context(), scheduled = [], blocked = [];
+  let state = {}, enabled = true, nextCalls = 0;
+  ctx.provide('sessionProjections', { stateOf: () => state });
+  const middleware = registerRetryMiddleware(ctx, {
+    isEnabled: () => enabled, onSchedule: entry => scheduled.push(entry), onBlocked: async entry => blocked.push(entry),
+    wait: async () => { throw Error('Cannot wait before a native handoff'); },
+  });
+  t.after(async () => { await middleware.dispose(); await ctx.fiber.dispose(); });
+  const payload = payloadFor({ id: 'observation' });
+  const dispatch = nextPayload => ctx.waterfall('agent/request-error', nextPayload, async () => { nextCalls++; return undefined; });
+  assert.equal(await dispatch(payload), undefined);
+  assert.equal(blocked.at(-1).kind, 'not-handled'); assert.equal(blocked.at(-1).reason, 'native-budget-remaining');
+  assert.equal(blocked.at(-1).nativeRetryCount, 0); assert.equal(blocked.at(-1).maxRetries, 2);
+  assert.equal(await dispatch({ ...payload, retryPolicy: undefined }), undefined);
+  assert.equal(blocked.at(-1).reason, 'native-policy-missing');
+  state = undefined;
+  assert.equal(await dispatch(payload), undefined); assert.equal(blocked.at(-1).reason, 'native-state-unavailable');
+  state = { incompatible: { retry: 1 } };
+  assert.equal(await dispatch(payload), undefined); assert.equal(blocked.at(-1).reason, 'native-state-unavailable');
+  assert.equal(await dispatch({ ...payload, retryPolicy: { mode: 'always' } }), undefined);
+  assert.equal(blocked.at(-1).reason, 'native-policy-unsupported');
+  const observations = blocked.length;
+  enabled = false; assert.equal(await dispatch(payload), undefined); assert.equal(blocked.length, observations);
+  enabled = true; const controller = new AbortController(); controller.abort();
+  assert.equal(await dispatch({ ...payload, signal: controller.signal }), undefined); assert.equal(blocked.length, observations);
+  const decision = { kind: 'retry', owner: 'downstream' };
+  assert.equal(await ctx.waterfall('agent/request-error', payload, async () => decision), decision);
+  assert.equal(blocked.length, observations); assert.equal(scheduled.length, 0); assert.equal(nextCalls, 7);
+});
+
+test('failed or cancelled skip observation never schedules a retry', async t => {
+  const entered = deferred(), persisted = deferred();
+  let observerSignal, schedules = 0;
+  const host = await createHost(t, {
+    onBlocked: async ({ signal }) => { observerSignal = signal; entered.resolve(); await persisted.promise; },
+    onSchedule: async () => { schedules++; },
+  });
+  const payload = payloadFor(host.session('missing-policy'), { retryPolicy: undefined });
+  const operation = host.dispatch(payload);
+  await entered.promise; host.middleware.cancel('missing-policy');
+  assert.equal(await operation, undefined); assert.equal(observerSignal.aborted, true);
+  persisted.resolve(); await Promise.resolve(); assert.equal(schedules, 0);
+  const error = new Error('Could not persist skip reason');
+  const failing = await createHost(t, { onBlocked: async () => { throw error; } });
+  await assert.rejects(failing.dispatch(payloadFor(failing.session(), { retryPolicy: undefined })), actual => actual === error);
+  assert.equal(failing.scheduled.length, 0); assert.equal(failing.waited.length, 0);
 });
 
 test('unsupported or missing native projection state is not treated as exhaustion', () => {

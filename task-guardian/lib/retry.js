@@ -37,6 +37,10 @@ const PERMANENT_CODES = new Map([
   ['INVALID_MODEL', 'model-unavailable'], ['MODEL_UNSUPPORTED', 'model-unavailable'],
   ['CLIENT_UPGRADE_REQUIRED', 'client-upgrade-required'],
   ['UNSUPPORTED_CONTENT', 'unsupported-content'], ['UNSUPPORTED_REASONING_EFFORT', 'unsupported-reasoning-effort'],
+  ['CONTENT_FILTER', 'content-restriction'], ['CONTENT_POLICY_VIOLATION', 'content-restriction'],
+  ['CONTENT_POLICY_ERROR', 'content-restriction'], ['POLICY_VIOLATION', 'content-restriction'],
+  ['SAFETY_REFUSAL', 'content-restriction'], ['SAFETY_VIOLATION', 'content-restriction'],
+  ['PROHIBITED_CONTENT', 'content-restriction'],
   ['INVALID_REPLAY_STATE', 'invalid-replay-state'], ['REQUEST_EXTENSION', 'request-configuration'],
   ['ENOTFOUND', 'endpoint-configuration'], ['ERR_INVALID_URL', 'endpoint-configuration'],
   ['CERT_HAS_EXPIRED', 'tls-configuration'], ['DEPTH_ZERO_SELF_SIGNED_CERT', 'tls-configuration'],
@@ -97,6 +101,7 @@ function failureEvidence(failure) {
 }
 
 function permanentTextReason(text) {
+  if (/\b(?:content policy (?:violation|error)|policy violation|safety (?:policy violation|refusal|violation)|prohibited content|(?:blocked|rejected|refused) (?:by|due to|under) (?:(?:the|a|our) )?(?:content filter|content policy)|content filter\s*:\s*(?:blocked|rejected|refused))\b|内容(?:审核|审查|过滤|安全(?:策略|政策)?)[^\n]{0,16}(?:拦截|阻止|拒绝|不通过|未通过)|(?:违反|触发)[^\n]{0,12}(?:内容政策|内容安全策略|安全政策)|违规内容|内容不合规/u.test(text)) return 'content-restriction';
   if (/\b(?:insufficient (?:quota|balance|credits?)|quota (?:exceeded|exhausted)|billing hard limit|credit balance (?:is )?(?:too low|insufficient)|(?:account |credit )?balance (?:is )?(?:insufficient|exhausted)|(?:run out of|out of) credits?)\b|余额不足|额度(?:不足|耗尽|用尽)|欠费|配额(?:不足|耗尽|用尽)/u.test(text)) return 'quota';
   if (/\b(?:invalid|missing|expired|incorrect|revoked) (?:api )?(?:key|token|credentials?)\b|\b(?:api key|access token) (?:is |has )?(?:invalid|expired|missing|revoked)\b|\b(?:unauthorized|authentication (?:failed|required|error))\b|认证失败|鉴权失败|密钥(?:无效|过期)|无效的?(?:密钥|api.?key)/u.test(text)) return 'authentication';
   if (/\b(?:permission denied|access denied|forbidden)\b|权限不足|没有权限|未授权/u.test(text)) return 'permission';
@@ -108,6 +113,14 @@ function permanentTextReason(text) {
   if (/\b(?:cert has expired|self signed certificate|certificate (?:has expired|verify failed|verification failed|is not valid)|unable to verify (?:the )?(?:first |leaf )?certificate|err tls cert|unable to get (?:local )?issuer)\b|证书(?:过期|无效|校验失败|验证失败)/u.test(text)) return 'tls-configuration';
   if (/\b(?:econnrefused|connection refused)\b/u.test(text) && /\blocalhost\b|\b127(?:\.\d{1,3}){3}\b|\[?::1\]?/u.test(text)) return 'endpoint-configuration';
   return undefined;
+}
+
+function providerOverloadEvidence(evidence) {
+  if (evidence.codes.has('OVERLOADED_ERROR')) return true;
+  // PI adapters retain the provider's text but replace its structured code.
+  // Require a provider error prefix and an explicit positive overload statement;
+  // a bare server_error/internal_error or a generic PI failure is insufficient.
+  return /(?:^|\n)\s*server error\s*:\s*(?:our servers? (?:are|is) (?:(?:currently|temporarily) )?overloaded|(?:the )?(?:servers?|service) (?:are|is) temporarily overloaded|temporarily overloaded)(?:[.!,:;\s]|$)/u.test(evidence.text);
 }
 
 function positiveMilliseconds(value) {
@@ -143,6 +156,11 @@ export function classifyFailure(failure, { nowMs = Date.now() } = {}) {
   if (/\b(?:econnrefused|connection refused|enetunreach|ehostunreach|certificate|tls certificate|ssl certificate)\b/u.test(evidence.text)) return result('unknown', 'ambiguous-transport-failure');
   const quotaHint = /\b(?:quota|billing|credits?|balance)\b|额度|配额|余额|计费/u.test(evidence.text);
   if (quotaHint) return result('unknown', 'ambiguous-quota-failure');
+  const overloaded = providerOverloadEvidence(evidence);
+  if (code === 'PI_AI_ERROR') {
+    if (status >= 400 && status <= 499 && status !== 408 && status !== 429) return result('unknown', 'unrecognized-http-status');
+    return overloaded ? result('transient', 'server-overloaded') : result('unknown', 'unrecognized-failure');
+  }
   const temporaryRate = /\b(?:too many (?:concurrent|simultaneous) requests|concurr(?:ent|ency) (?:request )?(?:limit|capacity)|rate limit (?:exceeded|error))\b|\b(?:temporary|temporarily)\b[^\n]{0,80}\b(?:rate limit|too many requests)\b|\b(?:rate limit|too many requests)\b[^\n]{0,80}\b(?:temporary|temporarily|try again|retry|per second|per minute)\b|\brequests per (?:second|minute)\b|并发(?:数|请求)?[^\n]{0,20}(?:限制|过多|超限)|请求频率过高|临时限流/u.test(evidence.text);
   if (status === 429 || /^RATE_LIMIT(?:_ERROR|_EXCEEDED)?$/u.test(code)) {
     return temporaryRate || retryAfterMs > 0
@@ -151,6 +169,7 @@ export function classifyFailure(failure, { nowMs = Date.now() } = {}) {
   if (status === 408 || status === 504) return result('transient', 'timeout');
   if (status >= 500 && status <= 599) return result('transient', 'server-error');
   if (status >= 400 && status <= 499) return result('unknown', 'unrecognized-http-status');
+  if (overloaded) return result('transient', 'server-overloaded');
   if (temporaryRate) return result('transient', 'rate-limit');
   if (TRANSIENT_CODES.has(code)) return result('transient', TRANSIENT_CODES.get(code));
   if (/\b(?:(?:stream|socket|read|response|request|connection|connect) (?:idle )?(?:timeout|timed out)|etimedout|stream idle timeout)\b/u.test(evidence.text)) return result('transient', 'timeout');
@@ -195,17 +214,21 @@ export function abortableWait(delayMs, signal) {
   });
 }
 
-/**
- * Match the native llmRetry projection's exact provider and resolved policy.
- * Missing/unsupported projection state is not evidence that the native budget
- * is exhausted. Intentionally version coupled; see NATIVE_RETRY_COMPATIBILITY.
- */
-export function nativeExhausted(ctx, payload) {
+/** Read the current-version native policy/projection without changing its budget. */
+function nativeRetrySnapshot(ctx, payload) {
   const policy = payload?.retryPolicy;
-  if (policy?.mode !== 'normal' || !Number.isSafeInteger(policy.maxRetries) || policy.maxRetries < 0
-    || !Array.isArray(policy.retryableCodes) || !policy.retryableCodes.every(code => typeof code === 'string')
-    || ![policy.initialDelayMs, policy.maxDelayMs, policy.jitterRatio].every(Number.isFinite)
-    || typeof payload.provider !== 'string' || !payload.agent?.session) return false;
+  const unavailable = reason => ({ available: false, reason, nativeRetryCount: null, maxRetries: Number.isSafeInteger(policy?.maxRetries) && policy.maxRetries >= 0 ? policy.maxRetries : null });
+  if (policy === undefined || policy === null) return unavailable('native-policy-missing');
+  if (policy.mode !== 'normal') return unavailable('native-policy-unsupported');
+  if (!Number.isSafeInteger(policy.maxRetries) || policy.maxRetries < 0
+    || !Array.isArray(policy.retryableCodes) || policy.retryableCodes.length === 0
+    || !policy.retryableCodes.every(code => typeof code === 'string' && code.length > 0)
+    || new Set(policy.retryableCodes).size !== policy.retryableCodes.length
+    || !Number.isFinite(policy.initialDelayMs) || policy.initialDelayMs <= 0 || policy.initialDelayMs > MAX_TIMER_DELAY_MS
+    || !Number.isFinite(policy.maxDelayMs) || policy.maxDelayMs <= 0 || policy.maxDelayMs > MAX_TIMER_DELAY_MS
+    || policy.initialDelayMs > policy.maxDelayMs
+    || !Number.isFinite(policy.jitterRatio) || policy.jitterRatio < 0 || policy.jitterRatio > 1) return unavailable('native-policy-invalid');
+  if (typeof payload.provider !== 'string' || !payload.agent?.session) return unavailable('native-state-unavailable');
   const policyKey = JSON.stringify([
     policy.mode, policy.maxRetries, [...policy.retryableCodes].sort(),
     policy.initialDelayMs, policy.maxDelayMs, policy.jitterRatio,
@@ -213,15 +236,49 @@ export function nativeExhausted(ctx, payload) {
   const stateKey = JSON.stringify([payload.provider, policyKey]);
   try {
     const state = ctx.sessionProjections.stateOf(payload.agent.session, 'llmRetry');
-    if (!state || typeof state !== 'object' || Array.isArray(state)) return false;
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return unavailable('native-state-unavailable');
     const prototype = Object.getPrototypeOf(state);
-    if (prototype !== Object.prototype && prototype !== null) return false;
-    const entry = state[stateKey];
-    const retry = entry === undefined ? 0 : entry?.retry;
-    return Number.isSafeInteger(retry) && retry >= policy.maxRetries;
+    if (prototype !== Object.prototype && prototype !== null) return unavailable('native-state-unavailable');
+    // The v1 native projection is Record<string, { retry: nonnegative int, retryId: string }>.
+    // Do not interpret a partial/newer/malformed object as a registered empty budget.
+    for (const entry of Object.values(state)) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || ![Object.prototype, null].includes(Object.getPrototypeOf(entry))
+        || !Object.hasOwn(entry, 'retry') || !Number.isSafeInteger(entry.retry) || entry.retry < 0
+        || !Object.hasOwn(entry, 'retryId') || typeof entry.retryId !== 'string'
+        || Object.keys(entry).some(key => key !== 'retry' && key !== 'retryId')) return unavailable('native-state-unavailable');
+    }
+    const entry = Object.hasOwn(state, stateKey) ? state[stateKey] : undefined;
+    return { available: true, policy, nativeRetryCount: entry?.retry ?? 0, maxRetries: policy.maxRetries };
   } catch {
-    return false;
+    return unavailable('native-state-unavailable');
   }
+}
+
+/** Strict budget-only API: a native early delegation is not exhaustion. */
+export function nativeExhausted(ctx, payload) {
+  const native = nativeRetrySnapshot(ctx, payload);
+  return native.available && native.nativeRetryCount >= native.maxRetries;
+}
+
+/**
+ * Explain whether an unhandled normal-policy failure has reached a guardian
+ * handoff boundary. Callers must await next() first and preserve any decision.
+ * This is intentionally coupled to NATIVE_RETRY_COMPATIBILITY, not an inferred
+ * promise that every downstream next() means the native budget was exhausted.
+ */
+export function nativeRetryDisposition(ctx, payload) {
+  const native = nativeRetrySnapshot(ctx, payload);
+  const decision = (eligible, reason) => ({ eligible, reason, nativeRetryCount: native.nativeRetryCount, maxRetries: native.maxRetries });
+  if (!native.available) return decision(false, native.reason);
+  if (typeof payload.failure?.code !== 'string' || payload.failure.code.length === 0) return decision(false, 'native-failure-invalid');
+  if (native.nativeRetryCount >= native.maxRetries) return decision(true, 'native-budget-exhausted');
+  // Match raw code membership, exactly as native normal does; normalization here
+  // could accidentally claim a code the original strategy would still handle.
+  if (!native.policy.retryableCodes.includes(payload.failure.code)) return decision(true, 'native-code-not-retryable');
+  const retryAfter = payload.failure.providerRetryAfterMs;
+  if (typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter > 0 && retryAfter > native.policy.maxDelayMs) return decision(true, 'native-retry-after-delegated');
+  return decision(false, 'native-budget-remaining');
 }
 
 /** Race even an injected asynchronous hook against cancellation. */
@@ -245,14 +302,17 @@ function untilAbort(operation, signal) {
 }
 
 /**
- * Install the outermost request-error middleware. Notification hooks may be
- * asynchronous; isEnabled must return a synchronous boolean.
- * isEnabled(sessionId, payload) is rechecked after downstream recovery, durable
- * scheduling and waiting. onSchedule({sessionId, attempt, delayMs, retryAt,
- * failure, reason, payload, signal}) must persist before resolving. An async
- * host hook must respect signal or its own task revision before committing.
- * onBlocked receives {sessionId, kind, reason, failure, payload, signal};
- * onReset receives {sessionId}.
+ * Install an outer request-error middleware that always delegates first.
+ * Notification hooks may be asynchronous; isEnabled must return a synchronous
+ * boolean. isEnabled(sessionId, payload) is rechecked after downstream recovery,
+ * durable scheduling and waiting. onSchedule({sessionId, attempt, delayMs,
+ * retryAt, failure, reason, handoff, nativeRetryCount, maxRetries, payload,
+ * signal}) must persist before resolving. An async host hook must respect signal
+ * or its own task revision before committing. onBlocked receives the same native
+ * handoff metadata plus {sessionId, kind, reason, failure, payload, signal}; kind
+ * 'not-handled' reports an unhandled failure the native boundary cannot yet
+ * authorize. Disabled/aborted calls and a non-undefined downstream decision do
+ * not publish a guardian observation. onReset receives {sessionId}.
  *
  * Host calls cancel(id) when the feature is disabled, the session is closed or
  * its task is cancelled. It only cancels guardian work; native recovery retains
@@ -295,12 +355,16 @@ export function registerRetryMiddleware(ctx, {
     const sessionId = payload.agent?.session?.id;
     const signals = [controller.signal, lifetime.signal, lifetimeSignal, payload.signal].filter(Boolean);
     const signal = AbortSignal.any(signals);
-    if (decision !== undefined || !sessionId || signal.aborted || !isEnabled(sessionId, payload)
-      || payload.retryPolicy?.mode === 'always') return decision;
-    if (!nativeExhausted(ctx, payload)) return decision;
+    if (decision !== undefined || !sessionId || signal.aborted || !isEnabled(sessionId, payload)) return decision;
+    const disposition = nativeRetryDisposition(ctx, payload);
+    const handoff = { handoff: disposition.reason, nativeRetryCount: disposition.nativeRetryCount, maxRetries: disposition.maxRetries };
+    if (!disposition.eligible) {
+      await untilAbort(onBlocked({ sessionId, kind: 'not-handled', reason: disposition.reason, ...handoff, failure: payload.failure, payload, signal }), signal);
+      return decision;
+    }
     const failure = classifyFailure(payload.failure, { nowMs: now() });
     if (failure.kind !== 'transient') {
-      await untilAbort(onBlocked({ sessionId, ...failure, failure: payload.failure, payload, signal }), signal);
+      await untilAbort(onBlocked({ sessionId, ...failure, ...handoff, failure: payload.failure, payload, signal }), signal);
       return decision;
     }
     const attempt = (attempts.get(sessionId) ?? 0) + 1;
@@ -308,7 +372,7 @@ export function registerRetryMiddleware(ctx, {
     const delayMs = computeBackoffMs(attempt, { random, retryAfterMs: failure.retryAfterMs });
     const scheduled = await untilAbort(onSchedule({
       sessionId, attempt, delayMs, retryAt: now() + delayMs,
-      failure: payload.failure, reason: failure.reason, payload, signal,
+      failure: payload.failure, reason: failure.reason, ...handoff, payload, signal,
     }), signal);
     if (scheduled.aborted || signal.aborted || !isEnabled(sessionId, payload)) return decision;
     const waited = await untilAbort(wait(delayMs, signal), signal);

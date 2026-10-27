@@ -12,7 +12,7 @@
 | **会话摘要悬浮框 · Session Summary** | [session-summary](session-summary/README.md) | 在对话右上角弹出可固定的摘要卡片：改动、子智能体、来源、计划、生成文件、后台任务、关联会话 | `dsh-session-summary` |
 | **会话搜索 · Session Search** | [session-search](session-search/README.md) | Cmd/Ctrl+F 搜索当前会话，Cmd/Ctrl+Shift+F 搜索会话标题与跨会话正文 | `dsh-session-search` |
 | **外部能力 · Capability Selector** | [capability-selector](capability-selector/README.md) | 发现并去重本机 Skills、企业 CLI 与 MCP，选择本次任务的能力；入口位于摘要下方 | `dsh-capability-selector` |
-| **任务守护 · Task Guardian** | [task-guardian](task-guardian/README.md) | 原生重试耗尽后的临时故障守护、恢复审查和问题倒计时；自动恢复与作答保持人工确认 | `dsh-task-guardian` |
+| **任务守护 · Task Guardian** | [task-guardian](task-guardian/README.md) | 原生优先的临时故障守护、恢复审查和问题倒计时；自动恢复与作答保持人工确认 | `dsh-task-guardian` |
 | **会话导航 · Session Navigator** | [session-navigator](session-navigator/README.md) | 稳定标题配合最近话题、后台 Luna 摘要、悬停详情与最近访问，快速找回会话 | `dsh-session-navigator` |
 
 ## 获取代码

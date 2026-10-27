@@ -58,7 +58,7 @@ export async function createGuardianStore(storageDomain, { ownerId = randomUUID(
       try {
         await sessions.put(sessionKey(id), next);
         // A failed audit publication leaves the primary state and its short audit tail durable.
-        await history.put(entry.id, { ...entry, settings: next.settings, epoch: next.epoch, run: next.run, retry: next.retry, recovery: next.recovery });
+        await history.put(entry.id, { ...entry, settings: next.settings, epoch: next.epoch, run: next.run, retry: next.retry, decision: next.lastDecision ?? null, recovery: next.recovery });
       } catch (error) { failure = error; throw error; }
       return structuredClone(next);
     });
