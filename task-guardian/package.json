@@ -1,6 +1,6 @@
 {
   "name": "dsh-task-guardian",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Per-session request retry guardian with durable audit, conservative recovery review and question deadlines.",
   "type": "module",
   "license": "MIT",
@@ -14,6 +14,7 @@
     "pretest": "node ../session-summary/scripts/extract-test-runtime.mjs @deepseek-ai/cordis @deepseek-ai/dsh-llm-retry @deepseek-ai/dsh-session @deepseek-ai/dsh-session-projection",
     "test": "node --test tests/*.test.js",
     "test:integration": "node --test tests/*.test.mjs",
+    "test:browser": "node scripts/test-accessory-browser.mjs",
     "pack:check": "npm pack --dry-run"
   },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" }, "client": { "platform": "web", "immediately": true, "inject": ["@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-sidebar-right"] } }

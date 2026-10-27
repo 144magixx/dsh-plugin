@@ -619,7 +619,7 @@ window.__ModuleLoader__.load({
     function summaryAccessoryHeight() {
       if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return 0
       const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dsh-summary-accessory-height'))
-      return Number.isFinite(value) ? clamp(value, 0, 96) : 0
+      return Number.isFinite(value) ? Math.max(0, value) : 0
     }
     /** Viewport coordinates, independent of the overlay's containing block. */
     function cardPlacement(anchor, position, viewport, measuredHeight, reservedHeight = 0) {
@@ -1502,7 +1502,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       // Pure helpers exported for the package's own tests.
       deriveChat, aggregateChanges, deriveSubagents, deriveRelated, deriveJobs, deriveTodos, planModeActive, fileReferences, parseMcpName, callInfo,
       fileAddressFor, changesReviewAddress, subagentChatAddress, planAddress, changesSummaryUrl, formatDuration, formatTokens, basename, hostOf, displayPath,
-      createStore, sanitizePrefs, sanitizePosition, cardPlacement, summaryLayout, createSummaryCache, createApi, SummaryCard, SummaryCardHost, SummaryOverlay, SummaryToggle, SummaryData, ApiContext,
+      createStore, sanitizePrefs, sanitizePosition, cardPlacement, summaryLayout, summaryAccessoryHeight, createSummaryCache, createApi, SummaryCard, SummaryCardHost, SummaryOverlay, SummaryToggle, SummaryData, ApiContext,
       HOST_ICONS, ZH, EN, CSS, SLOT, ENTRY_ID, OVERLAY_SLOT, OVERLAY_ID, STORAGE_KEY, SECTION_IDS
     }
   }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { client } from './client-core.mjs';
+import { client, source } from './client-core.mjs';
+import { runInNewContext } from 'node:vm';
 
 const { createStore, sanitizePrefs, createSummaryCache, createApi, cardPlacement, summaryLayout, STORAGE_KEY } = client;
 const defaultCollapsed = { subagents: true, sources: true, plan: true, files: true, jobs: true, related: true };
@@ -238,6 +239,34 @@ test('companion controls keep reserved space below long, docked and dragged summ
       const box = cardPlacement(anchor, position, viewport, 10000, 48);
       assert.ok(box.top + box.maxHeight + 48 <= viewport.height - 12, JSON.stringify({ viewport, box }));
       assert.ok(box.top >= 12 && box.maxHeight >= 1);
+    }
+  }
+});
+
+test('summary reads the full dynamic accessory reserve instead of truncating companion columns at 96px', () => {
+  let registration, cssValue = '164px';
+  runInNewContext(source, {
+    window: { __ModuleLoader__: { load(value) { registration = value; } } },
+    document: { documentElement: {} },
+    getComputedStyle: () => ({ getPropertyValue: key => { assert.equal(key, '--dsh-summary-accessory-height'); return cssValue; } }),
+    URL, URLSearchParams, AbortController, console,
+  });
+  const current = registration.factory(() => ({ createElement() {}, createContext: () => ({}), Fragment: 'Fragment' }));
+  assert.equal(current.summaryAccessoryHeight(), 164);
+  cssValue = '312.5px'; assert.equal(current.summaryAccessoryHeight(), 312.5);
+  cssValue = '48px'; assert.equal(current.summaryAccessoryHeight(), 48, 'standalone capability reserve stays unchanged');
+  for (const value of ['', 'auto', 'Infinity', '-20px']) { cssValue = value; assert.equal(current.summaryAccessoryHeight(), 0); }
+});
+
+test('large accessory columns retain the existing viewport safety clamp for docked and dragged summaries', () => {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 760, height: 480 }, { width: 320, height: 190 }]) {
+    const anchor = summaryLayout({ width: viewport.width, right: viewport.width, bottom: 60 }, viewport, false);
+    for (const reserve of [48, 108, 164, 312, 10000]) for (const position of [null, { left: 9999, top: 9999 }, { left: -99, top: -99 }]) {
+      const box = cardPlacement(anchor, position, viewport, 10000, reserve);
+      const effective = Math.min(reserve, viewport.height - 24 - 40);
+      assert.ok(box.top + box.maxHeight + effective <= viewport.height - 12, JSON.stringify({ viewport, reserve, position, box }));
+      assert.ok(box.top >= 12 && box.maxHeight >= 1);
+      assert.ok(box.left >= 12 && box.left + box.width <= viewport.width - 12);
     }
   }
 });

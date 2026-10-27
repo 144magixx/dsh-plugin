@@ -7,7 +7,9 @@ window.__ModuleLoader__.load({
     const NAME = 'dsh-capability-selector'
     const NS = 'capability-selector'
     const PANEL_ID = 'dsh-capability-selector-panel'
-    const RESERVE = 48
+    const DOCK_HEIGHT = 36
+    const RESERVE_GAP = 12
+    const ACCESSORIES = 'capability-selector.accessories'
     const EMPTY = Object.freeze([])
     const ZH = {
       title: '外部能力', subtitle: '发现本机能力，选择用于本次任务', search: '搜索名称、用途或来源…', all: '全部', skill: 'Skills', cli: 'CLI', mcp: 'MCP', refresh: '刷新', close: '关闭能力选择器', loading: '正在扫描本机能力…', empty: '没有匹配的能力', retry: '重试', source: '来源', allSources: '全部来源', readyOnly: '仅已安装 / 配置', selected: '已选 {count} 项', clear: '清空', add: '添加到输入框', adding: '正在添加…', detail: '详情', back: '返回能力列表', sources: '安装来源', instruction: '本次任务使用说明', full: '查看完整说明', detailLoading: '正在读取说明…', noDetail: '选择一项能力查看说明、来源和依赖', installed: '已安装', configured: '已配置', missing: '未安装', disabled: '已禁用', limited: '待核对', unknown: '待核对', local: '本机', scope: '扫描已支持的位置；安装和配置状态不代表登录就绪或当前会话可调用。', warnings: '{count} 条扫描提示', noSession: '打开一个会话后即可选择能力', stale: '当前会话已变化，请重新打开面板后添加。', blocked: '输入框正忙，请稍后重试；已选能力仍保留。', unsupported: '此版本未提供原生草稿追加接口，可复制使用说明。', copy: '复制使用说明', copied: '已复制使用说明', duplicate: '已添加这些能力；再次选择后可添加新的说明。', merged: '{count} 处来源', fingerprint: '内容版本', variants: '同名版本', added: '已添加到当前输入框', select: '选择 {name}', partial: '扫描结果不完整，展开提示查看原因', scanned: '最近扫描 {time}', description: '说明', truncated: '说明较长，以下仅展示部分内容。', configuredHint: 'MCP 已配置；实际连接与当前会话工具可用性尚未验证。', emptySelection: '先选择要使用的能力', error: '请求失败，请重试', noCopy: '无法访问剪贴板，请手动复制下方说明。', selectedHint: '选择仅表示本次任务的使用偏好',
@@ -26,10 +28,12 @@ window.__ModuleLoader__.load({
       const v = win.visualViewport
       return { left: v?.offsetLeft ?? 0, top: v?.offsetTop ?? 0, width: v?.width ?? win.innerWidth, height: v?.height ?? win.innerHeight }
     }
-    function dockPlacement(summary, fallback, viewport) {
+    function dockPlacement(summary, fallback, viewport, measuredHeight = DOCK_HEIGHT) {
       const { left: vx = 0, top: vy = 0, width: vw, height: vh } = viewport
       const width = Math.max(1, Math.min(summary?.width ?? 320, vw - 24))
-      return { left: clamp(summary?.left ?? (fallback?.right ?? vx + vw) - width - 12, vx + 12, vx + vw - width - 12), top: clamp(summary ? summary.bottom + 8 : (fallback?.bottom ?? vy + 52) + 8, vy + 12, vy + vh - 48), width, height: 36 }
+      const maxHeight = Math.max(1, Math.min(vh - 24, Math.max(DOCK_HEIGHT, vh - 24 - (summary ? 40 + RESERVE_GAP : 0))))
+      const height = clamp(Number.isFinite(measuredHeight) && measuredHeight > 0 ? measuredHeight : DOCK_HEIGHT, 1, maxHeight)
+      return { left: clamp(summary?.left ?? (fallback?.right ?? vx + vw) - width - 12, vx + 12, vx + vw - width - 12), top: clamp(summary ? summary.bottom + 8 : (fallback?.bottom ?? vy + 52) + 8, vy + 12, vy + vh - height - 12), width, height, maxHeight }
     }
     function panelPlacement(dock, viewport) {
       const { left: vx = 0, top: vy = 0, width: vw, height: vh } = viewport
@@ -116,14 +120,14 @@ window.__ModuleLoader__.load({
     const CSS = `
 .dsc-root{--dsc-bg:var(--dsw-alias-bg-base,#fff);--dsc-surface:var(--dsw-specific-menu,#fff);--dsc-text:var(--dsw-alias-label-primary,#27364b);--dsc-muted:var(--dsw-alias-label-secondary,#7d899b);--dsc-border:var(--dsw-alias-border-l1,#e3e8f0);--dsc-hover:var(--dsw-alias-interactive-bg-hover,#f3f5fa);--dsc-accent:var(--dsw-alias-state-business-primary,#5a74de);color:var(--dsc-text);font:13px/1.5 var(--dsh-font-family-text-default,system-ui,sans-serif);text-align:left}
 .dsc-root *{box-sizing:border-box}.dsc-root button,.dsc-root input,.dsc-root select{font:inherit}.dsc-root button{cursor:pointer}.dsc-root button:disabled{cursor:default;opacity:.5}.dsc-root button:focus-visible,.dsc-root input:focus-visible,.dsc-root select:focus-visible,.dsc-root summary:focus-visible{outline:2px solid var(--dsc-accent);outline-offset:2px}
-.dsc-dock{position:fixed;z-index:38;display:flex;align-items:center;gap:8px;pointer-events:auto;-webkit-app-region:no-drag;min-width:0}
+.dsc-dock{position:fixed;z-index:38;display:flex;flex-direction:column;align-items:stretch;gap:8px;overflow:auto;overscroll-behavior:contain;pointer-events:auto;-webkit-app-region:no-drag;min-width:0}.dsc-controls{display:flex;align-items:center;gap:8px;min-width:0;flex:none}.dsc-accessories{display:flex;flex-direction:column;gap:8px;min-width:0;flex:none}.dsc-accessories:empty{display:none}
 .dsc-trigger{height:36px;flex:none;display:inline-flex;align-items:center;gap:7px;padding:0 11px;border:1px solid var(--dsc-border);border-radius:9px;color:var(--dsc-muted);background:var(--dsc-surface);box-shadow:0 2px 8px #00000007}.dsc-trigger:hover,.dsc-trigger[aria-expanded=true]{background:var(--dsc-hover);color:var(--dsc-accent)}.dsc-count{font-size:11px;padding:0 6px;border-radius:10px;background:var(--dsc-hover);font-variant-numeric:tabular-nums}.dsc-selected-count{font-size:11px;color:var(--dsc-muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.dsc-panel{position:fixed;z-index:50;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--dsc-border);border-radius:14px;box-shadow:0 12px 50px #00000026;background:var(--dsc-bg);pointer-events:auto;-webkit-app-region:no-drag;max-width:calc(100vw - 24px)}
 .dsc-head{display:flex;align-items:center;gap:10px;flex:none;padding:17px 18px 10px}.dsc-head-icon{display:flex;align-items:center;justify-content:center;width:35px;height:35px;border-radius:9px;color:var(--dsc-accent);background:var(--dsc-hover)}.dsc-heading{flex:1;min-width:0}.dsc-heading h2{font-size:18px;margin:0;font-weight:600}.dsc-subtitle{font-size:11px;color:var(--dsc-muted);margin-top:1px}.dsc-plain{border:0;background:transparent;color:var(--dsc-muted);border-radius:6px;padding:5px 8px;flex:none}.dsc-plain:hover{background:var(--dsc-hover);color:var(--dsc-text)}.dsc-close{font-size:22px!important;line-height:22px}.dsc-search-wrap{padding:0 18px 12px;flex:none}.dsc-search{width:100%;height:37px;border:1px solid var(--dsc-border);border-radius:8px;background:var(--dsc-bg);color:var(--dsc-text);padding:0 11px;min-width:0}
 .dsc-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 18px 12px;flex:none;border-bottom:1px solid var(--dsc-border)}.dsc-tabs{display:flex;gap:3px;flex:1;min-width:210px}.dsc-tab{padding:5px 9px;border:0;border-radius:7px;background:transparent;color:var(--dsc-muted);white-space:nowrap}.dsc-tab[aria-pressed=true]{background:var(--dsc-hover);color:var(--dsc-accent);font-weight:600}.dsc-tab-count{font-size:10px;opacity:.75;margin-left:5px}.dsc-source-select{max-width:145px;height:29px;border:1px solid var(--dsc-border);border-radius:6px;color:var(--dsc-muted);background:var(--dsc-bg)}.dsc-ready{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--dsc-muted);white-space:nowrap}.dsc-ready input,.dsc-row input{accent-color:var(--dsc-accent)}
 .dsc-panel-body{display:grid;grid-template-columns:minmax(0,1fr) 290px;flex:1;min-height:0}.dsc-list{overflow:auto;overscroll-behavior:contain;min-height:0;padding:8px 10px;scrollbar-gutter:stable}.dsc-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;min-height:59px;min-width:0}.dsc-row[data-active=true]{background:var(--dsc-hover)}.dsc-row input{flex:none;width:16px;height:16px;margin:0}.dsc-entry{border:0;background:transparent;display:flex;gap:9px;align-items:center;min-width:0;flex:1;padding:3px 0;text-align:left;color:var(--dsc-text)}.dsc-kind-icon{width:29px;height:29px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:none;font-size:11px;color:#8b70c2;background:#9474c214}.dsc-kind-icon[data-kind=cli]{color:#529780;background:#52978014}.dsc-kind-icon[data-kind=mcp]{color:#658ec2;background:#658ec214}.dsc-entry-text{display:block;min-width:0;flex:1;overflow:hidden}.dsc-entry-name{display:flex;gap:6px;align-items:center;min-width:0;overflow:hidden;font-weight:500}.dsc-entry-name>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsc-merged{font-size:10px;color:var(--dsc-muted);font-weight:400;flex:none}.dsc-entry-description{display:block;max-width:100%;color:var(--dsc-muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}.dsc-row-meta{text-align:right;flex:none;min-width:0;overflow:hidden;font-size:10px;max-width:88px;color:var(--dsc-muted)}.dsc-row-meta .dsc-status{overflow:hidden;text-overflow:ellipsis}.dsc-status{display:block;white-space:nowrap}.dsc-status[data-status=installed]{color:#5b9b7e}.dsc-status[data-status=configured]{color:#688cc3}.dsc-status[data-status=limited]{color:#b08d4e}.dsc-row-source{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px;max-width:88px}
 .dsc-detail{border-left:1px solid var(--dsc-border);padding:16px;overflow:auto;overscroll-behavior:contain;min-width:0;background:var(--dsc-hover)}.dsc-detail h3{margin:8px 0;font-size:19px;overflow-wrap:anywhere}.dsc-detail h4{font-size:12px;margin:18px 0 7px;font-weight:600}.dsc-detail p{color:var(--dsc-muted);margin:6px 0;overflow-wrap:anywhere}.dsc-source-item{padding:7px 0;border-bottom:1px solid var(--dsc-border)}.dsc-source-item strong{font-size:11px;font-weight:500}.dsc-source-item code{font:10px/1.5 ui-monospace,monospace;display:block;overflow-wrap:anywhere;white-space:pre-wrap;color:var(--dsc-muted);margin-top:3px}.dsc-content{font:11px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;user-select:text}.dsc-task-text{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--dsc-muted);user-select:text}.dsc-mobile-back{display:none}.dsc-empty{padding:28px 16px;text-align:center;color:var(--dsc-muted);font-size:12px}
-.dsc-feedback{padding:8px 16px;border-top:1px solid var(--dsc-border);font-size:11px;flex:none;max-height:90px;overflow:auto;overflow-wrap:anywhere;color:var(--dsc-muted)}.dsc-feedback[role=alert]{color:#b18554}.dsc-warnings{margin:0;font-size:11px;color:var(--dsc-muted)}.dsc-warnings summary{cursor:pointer}.dsc-warnings ul{margin:6px 0;padding-left:20px}.dsc-footer{border-top:1px solid var(--dsc-border);padding:10px 16px;flex:none;display:flex;align-items:center;gap:10px;min-width:0}.dsc-selection{flex:1;min-width:0}.dsc-selection-head{display:flex;gap:10px;align-items:center;white-space:nowrap}.dsc-selection-head button{font-size:11px;padding:1px 4px}.dsc-chips{display:flex;gap:4px;overflow:auto;margin-top:5px;max-height:30px}.dsc-chip{border:0;border-radius:6px;padding:2px 6px;background:var(--dsc-hover);color:var(--dsc-muted);font-size:10px!important;white-space:nowrap;flex:none;max-width:180px;overflow:hidden;text-overflow:ellipsis}.dsc-add{border:0;border-radius:8px;background:var(--dsc-accent);color:#fff;padding:9px 14px;font-weight:500;flex:none}.dsc-footnote{font-size:10px;color:var(--dsc-muted);padding:0 16px 9px;flex:none}.dsc-backdrop{position:fixed;inset:0;z-index:49;background:#00000020;pointer-events:auto}.dsc-dock-notice{position:absolute;top:40px;right:0;max-width:320px;padding:7px 10px;border-radius:8px;background:var(--dsc-surface);box-shadow:0 3px 15px #00000014;font-size:11px;color:var(--dsc-muted)}
-@media(max-width:759px){.dsc-panel-body{grid-template-columns:minmax(0,1fr)}.dsc-detail{display:none;border-left:0}.dsc-panel[data-detail=true] .dsc-list{display:none}.dsc-panel[data-detail=true] .dsc-detail{display:block}.dsc-mobile-back{display:inline-flex}.dsc-subtitle{display:none}.dsc-head{padding:12px 12px 9px}.dsc-search-wrap{padding:0 12px 9px}.dsc-toolbar{padding:0 12px 9px;gap:5px}.dsc-tabs{min-width:100%;flex:none}.dsc-tab{padding:4px 8px}.dsc-footer{padding:9px 12px;gap:6px}.dsc-add{padding:8px 10px}.dsc-copy{display:none}.dsc-footnote{padding:0 12px 7px}.dsc-row-source{max-width:72px}.dsc-source-select{max-width:155px}.dsc-dock{gap:5px}}
+.dsc-feedback{padding:8px 16px;border-top:1px solid var(--dsc-border);font-size:11px;flex:none;max-height:90px;overflow:auto;overflow-wrap:anywhere;color:var(--dsc-muted)}.dsc-feedback[role=alert]{color:#b18554}.dsc-warnings{margin:0;font-size:11px;color:var(--dsc-muted)}.dsc-warnings summary{cursor:pointer}.dsc-warnings ul{margin:6px 0;padding-left:20px}.dsc-footer{border-top:1px solid var(--dsc-border);padding:10px 16px;flex:none;display:flex;align-items:center;gap:10px;min-width:0}.dsc-selection{flex:1;min-width:0}.dsc-selection-head{display:flex;gap:10px;align-items:center;white-space:nowrap}.dsc-selection-head button{font-size:11px;padding:1px 4px}.dsc-chips{display:flex;gap:4px;overflow:auto;margin-top:5px;max-height:30px}.dsc-chip{border:0;border-radius:6px;padding:2px 6px;background:var(--dsc-hover);color:var(--dsc-muted);font-size:10px!important;white-space:nowrap;flex:none;max-width:180px;overflow:hidden;text-overflow:ellipsis}.dsc-add{border:0;border-radius:8px;background:var(--dsc-accent);color:#fff;padding:9px 14px;font-weight:500;flex:none}.dsc-footnote{font-size:10px;color:var(--dsc-muted);padding:0 16px 9px;flex:none}.dsc-backdrop{position:fixed;inset:0;z-index:49;background:#00000020;pointer-events:auto}.dsc-dock-notice{position:static;flex:none;max-width:100%;padding:7px 10px;border-radius:8px;background:var(--dsc-surface);box-shadow:0 3px 15px #00000014;font-size:11px;color:var(--dsc-muted)}
+@media(max-width:759px){.dsc-panel-body{grid-template-columns:minmax(0,1fr)}.dsc-detail{display:none;border-left:0}.dsc-panel[data-detail=true] .dsc-list{display:none}.dsc-panel[data-detail=true] .dsc-detail{display:block}.dsc-mobile-back{display:inline-flex}.dsc-subtitle{display:none}.dsc-head{padding:12px 12px 9px}.dsc-search-wrap{padding:0 12px 9px}.dsc-toolbar{padding:0 12px 9px;gap:5px}.dsc-tabs{min-width:100%;flex:none}.dsc-tab{padding:4px 8px}.dsc-footer{padding:9px 12px;gap:6px}.dsc-add{padding:8px 10px}.dsc-copy{display:none}.dsc-footnote{padding:0 12px 7px}.dsc-row-source{max-width:72px}.dsc-source-select{max-width:155px}.dsc-controls{gap:5px}}
 @media(max-height:480px){.dsc-head{padding:6px 12px}.dsc-head-icon,.dsc-subtitle,.dsc-footnote,.dsc-chips,.dsc-ready{display:none}.dsc-heading h2{font-size:15px}.dsc-search-wrap{padding:0 12px 5px}.dsc-search{height:30px}.dsc-toolbar{padding:0 12px 5px;gap:3px}.dsc-tabs{min-width:0}.dsc-source-select{display:none}.dsc-footer{padding:5px 12px}.dsc-add{padding:5px 10px}.dsc-feedback{max-height:45px;padding:4px 12px}}
 @media(max-height:280px){.dsc-head{padding:0 12px;height:22px;min-height:0}.dsc-head .dsc-plain{padding:0 6px;height:20px;min-height:0;line-height:18px}.dsc-heading h2{font-size:13px;line-height:20px}.dsc-search-wrap{padding-bottom:3px}.dsc-search{height:24px;min-height:0}.dsc-toolbar{padding-bottom:3px}.dsc-tab{padding:2px 6px;height:24px;min-height:0}.dsc-footer{padding:3px 12px}.dsc-footer button{min-height:0}.dsc-copy{display:none}.dsc-feedback{max-height:28px}.dsc-list{padding:2px 6px}.dsc-row{min-height:38px;padding:3px 6px}.dsc-entry-description,.dsc-row-source{display:none}}
 `
@@ -137,11 +141,12 @@ window.__ModuleLoader__.load({
       }, [ref, target?.left, target?.top, target?.width, target?.height])
       return target ? { left: target.left + offset.x, top: target.top + offset.y, width: target.width, height: target.height } : { visibility: 'hidden', left: 0, top: 0 }
     }
-    function useDockGeometry(sessionId, anchors) {
+    function useDockGeometry(sessionId, anchors, dockRef) {
       const [geometry, setGeometry] = React.useState(null)
       React.useLayoutEffect(() => {
         if (!sessionId) { setGeometry(null); return }
-        let frame = 0, summaryElement, headerElement, stopped = false
+        let frame = 0, summaryElement, headerElement, dockElement, stopped = false, writtenReserve
+        const root = document.documentElement, previousReserve = root.style.getPropertyValue('--dsh-summary-accessory-height')
         const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
         const summaryObserver = typeof MutationObserver === 'function' ? new MutationObserver(schedule) : null
         function measure() {
@@ -149,23 +154,39 @@ window.__ModuleLoader__.load({
           const found = document.getElementById('dsh-session-summary-card')
           const summary = found?.getAttribute('data-dsh-session-summary') === sessionId && found.getClientRects().length ? found : null
           const header = anchors.get(sessionId)?.closest?.('header')
-          if (summary !== summaryElement || header !== headerElement) {
-            resizeObserver?.disconnect(); summaryObserver?.disconnect(); summaryElement = summary; headerElement = header
+          const ownDock = dockRef.current
+          if (summary !== summaryElement || header !== headerElement || ownDock !== dockElement) {
+            resizeObserver?.disconnect(); summaryObserver?.disconnect(); summaryElement = summary; headerElement = header; dockElement = ownDock
             if (summary) { resizeObserver?.observe(summary); summaryObserver?.observe(summary, { attributes: true, attributeFilter: ['style', 'data-layout'] }) }
             if (header) resizeObserver?.observe(header)
+            if (ownDock) resizeObserver?.observe(ownDock)
           }
-          const viewport = viewportOf(window), dock = dockPlacement(summary?.getBoundingClientRect(), header?.getBoundingClientRect(), viewport)
+          const viewport = viewportOf(window), dock = dockPlacement(summary?.getBoundingClientRect(), header?.getBoundingClientRect(), viewport, ownDock?.getBoundingClientRect().height)
+          const reserve = `${Math.ceil(dock.height) + RESERVE_GAP}px`
+          writtenReserve = reserve
+          if (root.style.getPropertyValue('--dsh-summary-accessory-height') !== reserve) {
+            root.style.setProperty('--dsh-summary-accessory-height', reserve)
+            window.dispatchEvent(new Event('dsh:summary-accessory-change'))
+          }
           const next = { dock, viewport, panel: panelPlacement(dock, viewport) }
           setGeometry(old => JSON.stringify(old) === JSON.stringify(next) ? old : next)
         }
-        function schedule() { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure) }
+        function schedule() { if (!stopped) { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure) } }
         const observer = typeof MutationObserver === 'function' ? new MutationObserver(schedule) : null
         observer?.observe(document.body, { childList: true, subtree: true })
         window.addEventListener('resize', schedule); window.addEventListener('scroll', schedule, true); window.addEventListener('dsh:summary-accessory-change', schedule)
         window.visualViewport?.addEventListener('resize', schedule); window.visualViewport?.addEventListener('scroll', schedule)
         measure()
-        return () => { stopped = true; cancelAnimationFrame(frame); observer?.disconnect(); resizeObserver?.disconnect(); summaryObserver?.disconnect(); window.removeEventListener('resize', schedule); window.removeEventListener('scroll', schedule, true); window.removeEventListener('dsh:summary-accessory-change', schedule); window.visualViewport?.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('scroll', schedule) }
-      }, [sessionId, anchors])
+        return () => {
+          stopped = true; cancelAnimationFrame(frame); observer?.disconnect(); resizeObserver?.disconnect(); summaryObserver?.disconnect()
+          window.removeEventListener('resize', schedule); window.removeEventListener('scroll', schedule, true); window.removeEventListener('dsh:summary-accessory-change', schedule)
+          window.visualViewport?.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('scroll', schedule)
+          if (writtenReserve !== undefined && root.style.getPropertyValue('--dsh-summary-accessory-height') === writtenReserve) {
+            if (previousReserve) root.style.setProperty('--dsh-summary-accessory-height', previousReserve); else root.style.removeProperty('--dsh-summary-accessory-height')
+            window.dispatchEvent(new Event('dsh:summary-accessory-change'))
+          }
+        }
+      }, [sessionId, anchors, dockRef])
       return geometry
     }
     function CapabilityAnchor({ sessionId, anchors }) {
@@ -232,23 +253,20 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dsc-footer' }, h('div', { className: 'dsc-selection' }, h('div', { className: 'dsc-selection-head' }, h('span', null, t('selected', { count: selected.length })), selected.length ? h('button', { type: 'button', className: 'dsc-plain', onClick: () => api.set({ selectedIds: EMPTY }) }, t('clear')) : null), selected.length ? h('div', { className: 'dsc-chips' }, ...selected.map(item => h('button', { type: 'button', className: 'dsc-chip', key: item.id, onClick: () => api.toggle(item.id), title: item.name }, item.name, ' ×'))) : null), h('button', { type: 'button', className: 'dsc-plain dsc-copy', disabled: !selected.length, onClick: () => api.copySelection() }, t('copy')), h('button', { type: 'button', className: 'dsc-add', disabled: !selected.length || state.adding || state.status === 'loading', onClick: () => api.add() }, t(state.adding ? 'adding' : 'add'), ' →')),
           h('div', { className: 'dsc-footnote' }, t('scope'))))
     }
-    function CapabilityOverlay({ api, anchors, uiSession, sessions, t }) {
+    function CapabilityOverlay({ api, anchors, uiSession, sessions, t, renderSlot = () => null }) {
       const active = useStore(uiSession.current), state = useStore(api)
       const sessionId = active?.key
       React.useLayoutEffect(() => { api.setSession(sessionId, sessionId ? sessions.binding(sessionId) : undefined) }, [api, sessions, sessionId, active?.ctx])
-      const geometry = useDockGeometry(sessionId, anchors)
       const triggerRef = React.useRef(null), dockRef = React.useRef(null)
-      const dockStyle = useFixedPosition(dockRef, geometry?.dock)
-      React.useEffect(() => {
-        if (!sessionId) return
-        const root = document.documentElement, old = root.style.getPropertyValue('--dsh-summary-accessory-height')
-        root.style.setProperty('--dsh-summary-accessory-height', `${RESERVE}px`); window.dispatchEvent(new Event('dsh:summary-accessory-change'))
-        return () => { if (root.style.getPropertyValue('--dsh-summary-accessory-height') === `${RESERVE}px`) { if (old) root.style.setProperty('--dsh-summary-accessory-height', old); else root.style.removeProperty('--dsh-summary-accessory-height'); window.dispatchEvent(new Event('dsh:summary-accessory-change')) } }
-      }, [sessionId])
+      const geometry = useDockGeometry(sessionId, anchors, dockRef)
+      const dockStyle = { ...useFixedPosition(dockRef, geometry?.dock), height: 'auto', maxHeight: geometry?.dock.maxHeight }
       React.useEffect(() => { if (!state.notice || state.open) return; const timer = setTimeout(() => api.set({ notice: '' }), 4000); return () => clearTimeout(timer) }, [api, state.notice, state.open])
       if (!sessionId || !geometry) return null
       return h('div', { className: 'dsc-root', 'data-dsh-capability-selector': '' },
-        h('div', { ref: dockRef, className: 'dsc-dock', style: dockStyle }, h('button', { ref: triggerRef, type: 'button', className: 'dsc-trigger', 'aria-label': t('title'), 'aria-expanded': state.open, 'aria-controls': state.open ? PANEL_ID : undefined, onClick: () => state.open ? api.close() : api.open() }, h(Icon), t('title'), state.items.length ? h('span', { className: 'dsc-count' }, state.items.length) : null), state.selectedIds.length ? h('span', { className: 'dsc-selected-count' }, t('selected', { count: state.selectedIds.length })) : null, !state.open && state.notice ? h('div', { className: 'dsc-dock-notice', role: 'status' }, state.notice) : null),
+        h('div', { ref: dockRef, className: 'dsc-dock', style: dockStyle },
+          h('div', { className: 'dsc-controls' }, h('button', { ref: triggerRef, type: 'button', className: 'dsc-trigger', 'aria-label': t('title'), 'aria-expanded': state.open, 'aria-controls': state.open ? PANEL_ID : undefined, onClick: () => state.open ? api.close() : api.open() }, h(Icon), t('title'), state.items.length ? h('span', { className: 'dsc-count' }, state.items.length) : null), state.selectedIds.length ? h('span', { className: 'dsc-selected-count' }, t('selected', { count: state.selectedIds.length })) : null),
+          h('div', { className: 'dsc-accessories' }, renderSlot(ACCESSORIES, { sessionId })),
+          !state.open && state.notice ? h('div', { className: 'dsc-dock-notice', role: 'status' }, state.notice) : null),
         state.open && state.sessionId === sessionId ? h(CapabilityPanel, { key: sessionId, api, state, t, placement: geometry.panel, triggerRef }) : null)
     }
     function apply(ctx) {
@@ -260,8 +278,8 @@ window.__ModuleLoader__.load({
       ctx.effect(() => () => api.dispose())
       const label = () => t('title')
       ctx.effect(() => ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({ name: 'conversation.session.header.utilities', id: `${NAME}.anchor`, order: 110, locale: NS, label, inject: () => ({ anchors }) }, CapabilityAnchor)))
-      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: `${NAME}.overlay`, order: 50, locale: NS, label, inject: () => ({ api, anchors, uiSession: ctx.uiSession, sessions: ctx.sessions }) }, CapabilityOverlay)))
+      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: `${NAME}.overlay`, order: 50, locale: NS, label, children: { [ACCESSORIES]: { kind: 'list', scope: 'root' } }, inject: () => ({ api, anchors, uiSession: ctx.uiSession, sessions: ctx.sessions }) }, CapabilityOverlay)))
     }
-    return { name: NAME, inject: ['slots', 'locale', 'uiSession', 'sessions', 'conversation'], apply, createController, createStore, dockPlacement, panelPlacement, filterItems, buildSelectionText, requestJSON, CSS, ZH, EN, CapabilityPanel, CapabilityOverlay, CapabilityAnchor, Details }
+    return { name: NAME, inject: ['slots', 'locale', 'uiSession', 'sessions', 'conversation'], apply, createController, createStore, dockPlacement, useDockGeometry, ACCESSORIES, panelPlacement, filterItems, buildSelectionText, requestJSON, CSS, ZH, EN, CapabilityPanel, CapabilityOverlay, CapabilityAnchor, Details }
   },
 })

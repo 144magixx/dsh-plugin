@@ -10,6 +10,7 @@ import { offlineGuard } from '../../session-summary/scripts/offline-test-guard.m
 const ID = 'dsh-task-guardian', KIND = 'task-guardian', NS = 'taskGuardian';
 const NATIVE_GUIDE = '@deepseek-ai/dsh-client-ui-sidebar-right/guide';
 const PANEL = 'sidebar.right.pane.tab', GUIDE_ENTRY = 'sidebar.right.tab.guide.entry', GUIDE = 'sidebar.right.tab.guide';
+const ACCESSORY = 'capability-selector.accessories', ACCESSORY_OWNER = 'test-capability-selector-owner';
 const pluginFile = new URL('../lib/client.js', import.meta.url);
 
 /** Adapt the existing integration-client-runtime without its extraction writes. */
@@ -101,7 +102,11 @@ function installedClient() {
 
 function observable(value, subscriptions) {
   const listeners = new Set(); subscriptions.push(listeners);
-  return { getSnapshot: () => value, subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); } };
+  return {
+    getSnapshot: () => value,
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    setSnapshot(next, notify = true) { value = next; if (notify) for (const listener of listeners) listener(); },
+  };
 }
 
 async function fixture() {
@@ -138,7 +143,8 @@ async function fixture() {
     ctx.provide('layout', { panelInfo: observable({ activePanelId: null }, subscriptions), openRightbar: forbid('open rightbar'), closeRightbar: forbid('close rightbar') });
     ctx.provide('sessions', { sessionOf: () => undefined, binding: () => undefined, scope: () => undefined,
       retain: forbid('retain user session'), refresh: forbid('refresh sessions') });
-    ctx.provide('uiSession', { adapter: { current: observable({ key: undefined }, subscriptions) }, provide: () => () => {} });
+    const currentSession = observable({ key: undefined }, subscriptions);
+    ctx.provide('uiSession', { current: currentSession, adapter: { current: currentSession }, provide: () => () => {} });
     ctx.provide('uiWorkspace', { openSession: forbid('navigate user session') });
     ctx.provide('fileUpload', {}); ctx.provide('resources', { pin: forbid('pin resource') });
     const registerShortcut = definition => {
@@ -156,8 +162,21 @@ async function fixture() {
     let releaseShell = declareShell();
     await mount('@deepseek-ai/dsh-client-ui-conversation');
     await mount('@deepseek-ai/dsh-client-ui-sidebar-right');
+    let releaseAccessoryOwner;
+    const mountAccessoryOwner = () => {
+      assert.equal(releaseAccessoryOwner, undefined, 'accessory fixture owner is mounted once');
+      releaseAccessoryOwner = ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+        name: 'shell.overlay', id: ACCESSORY_OWNER,
+        children: { [ACCESSORY]: { kind: 'list', scope: 'root' } },
+      }, () => null));
+    };
+    const unmountAccessoryOwner = () => { releaseAccessoryOwner?.(); releaseAccessoryOwner = undefined; };
     return { ...client, ctx, dictionaries, diagnostics, subscriptions, shortcuts, forbiddenCalls, localeListeners,
       setLanguage(next) { language = next; revision++; copySnapshot = { language, revision }; for (const listener of localeListeners) listener(); },
+      // Change the source snapshot for the API guard without publishing a native
+      // Session selection: this fixture never retains or renders a user Session.
+      setCurrent(sessionId) { currentSession.setSnapshot({ key: sessionId }, false); },
+      mountAccessoryOwner, unmountAccessoryOwner,
       collapseShell() { releaseShell(); }, restoreShell() { releaseShell = declareShell(); },
       async close() { try { await ctx.fiber.dispose(); } finally { client.archive.close(); } },
     };
@@ -176,7 +195,7 @@ function assertBilingualKeys(plugin) {
   }
 }
 
-test('real installed modules keep Guardian separate from native guide and clean all registrations on unload', async t => {
+test('real installed modules mount Guardian only under its accessory owner and preserve the native guide', async t => {
   const f = await fixture(), { ctx } = f;
   try {
     t.diagnostic(`Installed DSH ${f.version}; bundled React ${f.staticModules.react.version}; no live GUI/session/network`);
@@ -186,7 +205,7 @@ test('real installed modules keep Guardian separate from native guide and clean 
     const nativeGuideEntry = nativePanelEntries.find(entry => entry.options.key === NATIVE_GUIDE);
     const nativeTitleEntries = occupants(ctx, 'sidebar.right.pane.tab.title');
     const nativeChainEntries = occupants(ctx, GUIDE), nativeCards = occupants(ctx, GUIDE_ENTRY);
-    const nativeTypes = [...ctx.sidebarRightTabs.entries()];
+    const nativeTypes = [...ctx.sidebarRightTabs.entries()], nativeGuideCards = [...ctx.sidebarRightTabs.guide()];
     const nativeDictionaries = [...f.dictionaries.keys()].sort(), nativeShortcuts = [...f.shortcuts.keys()].sort();
     assert.equal(nativeGuideType.id, NATIVE_GUIDE); assert.equal(nativeGuideType.priority, 'builtin');
     assert.ok(nativeGuideEntry, 'native sidebar must own the guide declaration');
@@ -195,68 +214,89 @@ test('real installed modules keep Guardian separate from native guide and clean 
       assert.equal(typeof ctx.slots.spec(name).inject.hooks.tabInfo, 'function');
     }
     assert.equal(ctx.slots.spec(GUIDE).kind, 'chain');
+    assert.equal(ctx.slots.spec(ACCESSORY), undefined, 'custom accessory slot belongs to its companion owner');
     const changes = [];
     const unsubscribe = ctx.sidebarRightTabs.subscribe(() => changes.push(ctx.sidebarRightTabs.entries().map(entry => entry.id)));
     try {
       f.registerPlugin();
       const plugin = await f.modules.import(ID);
       assert.deepEqual([...f.modules.loadCache.get(ID).edges], ['react'], 'plugin only requires shell React');
-      assert.deepEqual(Array.from(plugin.inject), ['slots', 'locale', 'sidebarRightTabs']);
+      assert.deepEqual(Array.from(plugin.inject), ['slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'uiSession']);
       assertBilingualKeys(plugin);
+      assert.equal(plugin.GuardianGuide, undefined, 'the former guide card implementation is absent');
       const fiber = ctx.plugin(plugin); await fiber.await();
       assert.equal(fiber.state, 2, String(fiber._error));
       const guardian = ctx.sidebarRightTabs.get(KIND);
       assert.equal(guardian.id, ID); assert.equal(guardian.title(), plugin.EN.title);
+      assert.equal(guardian.guide, undefined, 'the detail page contributes no Start-page guide card');
       assert.equal(ctx.sidebarRightTabs.get('guide'), nativeGuideType, 'native guide is not taken over');
       assert.deepEqual([...ctx.sidebarRightTabs.entries()], [...nativeTypes, guardian]);
-      const cards = ctx.sidebarRightTabs.guide().filter(entry => entry.providerId === ID);
-      assert.equal(cards.length, 1); assert.equal(cards[0].id, KIND); assert.equal(cards[0].kind, KIND);
-      assert.equal(cards[0].title(), plugin.EN.title); assert.equal(cards[0].description(), plugin.EN.description);
-      assert.equal(cards[0].icon, plugin.Shield); assert.equal(cards[0].order, 100);
+      assert.deepEqual([...ctx.sidebarRightTabs.guide()], nativeGuideCards, 'native Start-page cards remain unchanged');
+      assert.equal(ctx.sidebarRightTabs.guide().some(entry => entry.providerId === ID), false);
       const panelEntries = occupants(ctx, PANEL), panel = panelEntries.find(entry => entry.options.key === ID);
-      const guide = occupants(ctx, GUIDE_ENTRY).find(entry => entry.options.key === ID);
-      assert.deepEqual(panelEntries, [...nativePanelEntries, panel]);
-      assert.deepEqual(occupants(ctx, GUIDE_ENTRY), [...nativeCards, guide]);
-      assert.equal(panel.component, plugin.GuardianPanel); assert.equal(guide.component, plugin.GuardianGuide);
-      assert.equal(panel.locale, NS); assert.equal(guide.locale, NS);
-      assert.equal(typeof panel.inject().api, 'function'); assert.equal(typeof guide.inject().api, 'function');
+      assert.ok(panel); assert.deepEqual(panelEntries, [...nativePanelEntries, panel]);
+      assert.equal(panel.component, plugin.GuardianPanel); assert.equal(panel.locale, NS);
+      assert.equal(typeof panel.inject().api, 'function');
+      assert.deepEqual(occupants(ctx, GUIDE_ENTRY), nativeCards, 'no Guardian registration in the native guide entry slot');
+      assert.equal(occupants(ctx, ACCESSORY).length, 0, 'accessory waits for its companion owner');
       assert.equal(occupants(ctx, PANEL).find(entry => entry.options.key === NATIVE_GUIDE), nativeGuideEntry);
       assert.deepEqual(occupants(ctx, GUIDE), nativeChainEntries, 'whole-guide replacement chain stays untouched');
       assert.deepEqual(occupants(ctx, 'sidebar.right.pane.tab.title'), nativeTitleEntries);
       assert.equal(f.dictionaries.get(NS).zh, plugin.ZH); assert.equal(f.dictionaries.get(NS).en, plugin.EN);
-      f.setLanguage('zh'); assert.equal(guardian.title(), plugin.ZH.title); assert.equal(cards[0].description(), plugin.ZH.description);
-      f.setLanguage('en');
+      f.setLanguage('zh'); assert.equal(guardian.title(), plugin.ZH.title); f.setLanguage('en');
       const claim = ctx.sidebarRightTabs.claim('sidebar://task-guardian', KIND);
       assert.equal(claim.kind, KIND); assert.equal(claim.title, plugin.EN.title); assert.equal(claim.contentId, 'sidebar://task-guardian');
-      // Check the actual native contextual hook forwarding and the guide action.
-      const ownerHook = () => ({ tab: { actions: { openTab() {} } } });
-      assert.equal(ctx.slots.spec(GUIDE_ENTRY).inject.hooks.tabInfo({}, ownerHook), ownerHook);
+
+      f.mountAccessoryOwner();
+      assert.equal(ctx.slots.spec(ACCESSORY).kind, 'list'); assert.equal(ctx.slots.spec(ACCESSORY).scope, 'root');
+      assert.equal(occupants(ctx, 'shell.overlay').filter(entry => entry.options.id === ACCESSORY_OWNER).length, 1);
+      let accessory = occupants(ctx, ACCESSORY).find(entry => entry.options.id === ID);
+      assert.ok(accessory); assert.equal(occupants(ctx, ACCESSORY).length, 1);
+      assert.equal(accessory.component, plugin.GuardianAccessory); assert.equal(accessory.locale, NS);
+      assert.equal(accessory.options.order, 100); assert.equal(typeof accessory.inject().api, 'function');
+      assert.equal(typeof accessory.inject().open, 'function');
       const opened = [];
-      const element = plugin.GuardianGuide({ sessionId: 'synthetic-api-only', api: guide.inject().api, t: key => plugin.EN[key],
-        useTabInfo: () => ({ tab: { actions: { openTab: (...args) => opened.push(args) } } }) });
+      const element = plugin.GuardianAccessory({ sessionId: 'synthetic-api-only', api: accessory.inject().api,
+        t: key => plugin.EN[key], open: (...args) => opened.push(args) });
       assert.ok(f.staticModules.react.isValidElement(element)); assert.equal(element.props.compact, true);
-      element.props.open(); assert.equal(opened.length, 1); assert.equal(opened[0][0], KIND); assert.equal(opened[0][1].replaceTab, true);
-      // Collapse the real owner's declarations, then ensure inject remounts once.
+      assert.equal(element.props.sessionId, 'synthetic-api-only');
+      element.props.open(); assert.deepEqual(opened, [['synthetic-api-only']], 'accessory forwards its own session to the guarded opener');
+      // A companion unload removes its declaration and the injected entry, but
+      // retains the independent detail type. Reinstalling the owner creates one entry.
+      f.unmountAccessoryOwner();
+      assert.equal(ctx.slots.spec(ACCESSORY), undefined); assert.equal(occupants(ctx, ACCESSORY).length, 0);
+      assert.equal(ctx.sidebarRightTabs.get(KIND), guardian);
+      assert.equal(occupants(ctx, PANEL).filter(entry => entry.options.key === ID).length, 1);
+      f.mountAccessoryOwner();
+      accessory = occupants(ctx, ACCESSORY).find(entry => entry.options.id === ID);
+      assert.ok(accessory); assert.equal(occupants(ctx, ACCESSORY).length, 1);
+      // Collapse the real shell's owner declarations: its nested custom owner
+      // and Guardian entries must disappear and remount without orphan effects.
       f.collapseShell();
-      assert.equal(ctx.slots.spec(PANEL), undefined); assert.equal(ctx.slots.spec(GUIDE_ENTRY), undefined);
+      for (const name of [PANEL, GUIDE_ENTRY, ACCESSORY]) assert.equal(ctx.slots.spec(name), undefined);
       assert.equal(ctx.sidebarRightTabs.get(KIND), guardian);
       f.restoreShell();
       assert.equal(occupants(ctx, PANEL).filter(entry => entry.options.key === ID).length, 1);
-      assert.equal(occupants(ctx, GUIDE_ENTRY).filter(entry => entry.options.key === ID).length, 1);
+      assert.equal(occupants(ctx, ACCESSORY).filter(entry => entry.options.id === ID).length, 1);
+      assert.deepEqual(occupants(ctx, GUIDE_ENTRY), nativeCards);
       assert.equal(occupants(ctx, PANEL).filter(entry => entry.options.key === NATIVE_GUIDE).length, 1);
       assert.equal(occupants(ctx, GUIDE).length, nativeChainEntries.length);
       await fiber.dispose();
       assert.equal(ctx.sidebarRightTabs.get(KIND), undefined); assert.equal(ctx.sidebarRightTabs.get('guide'), nativeGuideType);
       assert.deepEqual([...ctx.sidebarRightTabs.entries()], nativeTypes);
-      assert.equal(ctx.sidebarRightTabs.guide().some(entry => entry.providerId === ID), false);
+      assert.deepEqual([...ctx.sidebarRightTabs.guide()], nativeGuideCards);
       assert.equal(occupants(ctx, PANEL).some(entry => entry.options.key === ID), false);
-      assert.equal(occupants(ctx, GUIDE_ENTRY).some(entry => entry.options.key === ID), false);
+      assert.deepEqual(occupants(ctx, GUIDE_ENTRY), nativeCards);
+      assert.equal(occupants(ctx, ACCESSORY).some(entry => entry.options.id === ID), false);
       assert.equal(occupants(ctx, PANEL).find(entry => entry.options.key === NATIVE_GUIDE)?.component, nativeGuideEntry.component);
       assert.deepEqual([...f.dictionaries.keys()].sort(), nativeDictionaries); assert.deepEqual([...f.shortcuts.keys()].sort(), nativeShortcuts);
       assert.equal(changes.length, 2, 'one registration and one deregistration notification');
+      f.unmountAccessoryOwner(); f.mountAccessoryOwner();
+      assert.equal(occupants(ctx, ACCESSORY).length, 0, 'no orphan accessory inject callback after plugin unload');
       f.collapseShell(); f.restoreShell();
-      assert.equal(occupants(ctx, PANEL).some(entry => entry.options.key === ID), false, 'no orphan panel inject callback');
-      assert.equal(occupants(ctx, GUIDE_ENTRY).some(entry => entry.options.key === ID), false, 'no orphan guide inject callback');
+      assert.equal(occupants(ctx, PANEL).some(entry => entry.options.key === ID), false, 'no orphan detail inject callback');
+      assert.deepEqual(occupants(ctx, GUIDE_ENTRY), nativeCards);
+      assert.equal(occupants(ctx, ACCESSORY).length, 0);
       assert.equal(f.context.document, undefined);
       assert.deepEqual(f.denied, []); assert.deepEqual(f.forbiddenCalls, []); assert.deepEqual(f.diagnostics, []);
     } finally { unsubscribe(); }
@@ -266,50 +306,84 @@ test('real installed modules keep Guardian separate from native guide and clean 
   assert.deepEqual(offlineGuard.denied, []);
 });
 
-test('injected API preserves transport binding without a network request', async () => {
+test('accessory transport and opener fence mutations to the currently selected synthetic session', async () => {
   const f = await fixture();
+  let originalOpenTab;
   try {
-    const calls = [];
+    f.mountAccessoryOwner();
+    const calls = [], opened = [];
     const transport = { async fetch(url, options) {
       assert.equal(this, transport, 'transport.fetch retains its receiver'); calls.push({ url, options });
-      return { ok: true, json: async () => ({ ok: true, sessionId: 'synthetic-api-only' }) };
+      return { ok: true, json: async () => ({ ok: true, sessionId: JSON.parse(options.body).sessionId }) };
     } };
     f.context.__DSH_TRANSPORT__ = transport; f.registerPlugin();
     const plugin = await f.modules.import(ID), fiber = f.ctx.plugin(plugin); await fiber.await();
     assert.equal(fiber.state, 2, String(fiber._error));
+    assert.equal(f.ctx.uiSession.current, f.ctx.uiSession.adapter.current, 'native adapter and API fence share one source');
     const panel = occupants(f.ctx, PANEL).find(entry => entry.options.key === ID);
-    const guide = occupants(f.ctx, GUIDE_ENTRY).find(entry => entry.options.key === ID), controller = new AbortController();
-    const result = await panel.inject().api('snapshot', { sessionId: 'synthetic-api-only' }, controller.signal);
-    assert.equal(result.sessionId, 'synthetic-api-only'); assert.equal(guide.inject().api, panel.inject().api); assert.equal(calls.length, 1);
+    const accessory = occupants(f.ctx, ACCESSORY).find(entry => entry.options.id === ID);
+    const api = accessory.inject().api, open = accessory.inject().open, controller = new AbortController();
+    assert.notEqual(api, panel.inject().api, 'accessory mutations use the current-session wrapper');
+    originalOpenTab = f.ctx.sidebarRight.openTab;
+    f.ctx.sidebarRight.openTab = (...args) => opened.push(args);
+    const target = 'synthetic-api-only';
+    // Read-only snapshots remain available before selection; mutation/open do not.
+    const result = await api('snapshot', { sessionId: target }, controller.signal);
+    assert.equal(result.sessionId, target); assert.equal(calls.length, 1);
     assert.equal(calls[0].url, '/api/task-guardian/snapshot'); assert.equal(calls[0].options.method, 'POST');
     assert.equal(calls[0].options.credentials, 'same-origin'); assert.equal(calls[0].options.headers['content-type'], 'application/json');
-    assert.deepEqual(JSON.parse(calls[0].options.body), { sessionId: 'synthetic-api-only' }); assert.equal(calls[0].options.signal, controller.signal);
+    assert.deepEqual(JSON.parse(calls[0].options.body), { sessionId: target }); assert.equal(calls[0].options.signal, controller.signal);
+    const mutation = { sessionId: target, epoch: 0, settings: { enabled: true } };
+    await assert.rejects(api('configure', mutation, controller.signal), error => error.code === 'settings_changed_reload');
+    await assert.rejects(api('startup', { sessionId: target, enabled: true }, controller.signal), error => error.code === 'settings_changed_reload');
+    open(target); assert.equal(opened.length, 0); assert.equal(calls.length, 1, 'unselected mutations never reach transport');
+
+    f.setCurrent(target);
+    assert.equal(f.ctx.uiSession.current.getSnapshot().key, target);
+    await api('configure', mutation, controller.signal);
+    assert.equal(calls.length, 2); assert.equal(calls[1].url, '/api/task-guardian/configure');
+    assert.deepEqual(JSON.parse(calls[1].options.body), mutation); assert.equal(calls[1].options.signal, controller.signal);
+    await api('startup', { sessionId: target, enabled: true }, controller.signal);
+    assert.equal(calls.length, 3); assert.equal(calls[2].url, '/api/task-guardian/startup');
+    open(target); assert.deepEqual(opened, [[KIND]], 'the valid current-session opener uses the public sidebar API');
+    // A stale rendered accessory cannot configure/startup or open after selection changes.
+    f.setCurrent('another-synthetic-session');
+    const before = calls.length;
+    await assert.rejects(api('configure', mutation, controller.signal), error => error.code === 'settings_changed_reload');
+    await assert.rejects(api('startup', { sessionId: target, enabled: false }, controller.signal), error => error.code === 'settings_changed_reload');
+    open(target); assert.equal(opened.length, 1); assert.equal(calls.length, before);
+    await api('snapshot', { sessionId: target }, controller.signal);
+    assert.equal(calls.length, before + 1, 'stale-session snapshots remain read-only');
+    open('another-synthetic-session'); assert.deepEqual(opened, [[KIND], [KIND]]);
+    f.setCurrent(undefined); open('another-synthetic-session'); assert.equal(opened.length, 2);
     await assert.rejects(plugin.requestJSON(async () => ({ ok: false, json: async () => ({ ok: false, error: 'settings_changed_reload' }) }),
       'configure', {}, controller.signal), error => error.code === 'settings_changed_reload');
     await fiber.dispose();
     assert.deepEqual(f.denied, []); assert.deepEqual(f.forbiddenCalls, []); assert.deepEqual(f.diagnostics, []);
-  } finally { await f.close(); }
+  } finally { if (originalOpenTab) f.ctx.sidebarRight.openTab = originalOpenTab; await f.close(); }
   assert.deepEqual(offlineGuard.denied, []);
 });
 
-test('root context unload cleans a still-active Guardian and all native service registrations', async () => {
+test('root context unload cleans a still-active Guardian accessory, detail and all native registrations', async () => {
   const f = await fixture();
   const tabs = f.ctx.sidebarRightTabs, slots = f.ctx.slots;
   try {
-    f.registerPlugin();
+    f.mountAccessoryOwner(); f.registerPlugin();
     const plugin = await f.modules.import(ID), fiber = f.ctx.plugin(plugin);
     await fiber.await();
     assert.equal(fiber.state, 2, String(fiber._error));
-    assert.equal(tabs.get(KIND).id, ID);
+    assert.equal(tabs.get(KIND).id, ID); assert.equal(tabs.get(KIND).guide, undefined);
     assert.equal(f.dictionaries.has(NS), true);
     assert.equal(occupants(f.ctx, PANEL).some(entry => entry.options.key === ID), true);
-    assert.equal(occupants(f.ctx, GUIDE_ENTRY).some(entry => entry.options.key === ID), true);
+    assert.equal(occupants(f.ctx, GUIDE_ENTRY).some(entry => entry.options.key === ID), false);
+    assert.equal(occupants(f.ctx, ACCESSORY).some(entry => entry.options.id === ID), true);
   } finally { await f.close(); }
   assert.equal(tabs.entries().length, 0);
   assert.equal(tabs.guide().length, 0);
-  for (const name of ['root', PANEL, GUIDE_ENTRY, GUIDE]) {
+  for (const name of ['root', 'shell.overlay', PANEL, GUIDE_ENTRY, GUIDE, ACCESSORY]) {
     assert.equal([...slots.entries(name)].length, 0, `root disposal removes ${name} registrations`);
   }
+  assert.equal(slots.spec(ACCESSORY), undefined);
   assert.equal(f.dictionaries.size, 0); assert.equal(f.shortcuts.size, 0); assert.equal(f.localeListeners.size, 0);
   assert.ok(f.subscriptions.every(listeners => listeners.size === 0));
   assert.deepEqual(f.denied, []); assert.deepEqual(f.forbiddenCalls, []); assert.deepEqual(f.diagnostics, []);
@@ -322,9 +396,10 @@ test('root context unload cleans a still-active Guardian and all native service 
  * deferred API promises, React-like state/ref/effect lifetimes and fake timers.
  * This is a concurrency regression test, not a React renderer or HTML preview.
  */
-function guardianHookHarness() {
-  const cells = [], effects = [], timers = new Map(), calls = [], postUnmountWrites = [];
-  let cursor = 0, nextTimer = 0, mounted = true, dirty = true, sessionId, current;
+function guardianHookHarness({ deferEffectStateUpdates = false, transformSource = source => source } = {}) {
+  const cells = [], effects = [], pendingEffectState = [], timers = new Map(), calls = [], postUnmountWrites = [];
+  let cursor = 0, nextTimer = 0, mounted = true, dirty = true, applyingEffects = false, sessionId, current;
+  const flushEffectState = () => { for (const commit of pendingEffectState.splice(0)) commit(); };
   const dependenciesEqual = (left, right) => left !== undefined && right !== undefined
     && left.length === right.length && left.every((value, index) => Object.is(value, right[index]));
   const api = (action, payload, signal) => {
@@ -340,8 +415,12 @@ function guardianHookHarness() {
       if (!(index in cells)) cells[index] = typeof initial === 'function' ? initial() : initial;
       return [cells[index], next => {
         if (!mounted) { postUnmountWrites.push(index); return; }
-        const value = typeof next === 'function' ? next(cells[index]) : next;
-        if (!Object.is(cells[index], value)) { cells[index] = value; dirty = true; }
+        const commit = () => {
+          const value = typeof next === 'function' ? next(cells[index]) : next;
+          if (!Object.is(cells[index], value)) { cells[index] = value; dirty = true; }
+        };
+        if (deferEffectStateUpdates && applyingEffects) pendingEffectState.push(commit);
+        else { flushEffectState(); commit(); }
       }];
     },
     useRef(initial) {
@@ -366,7 +445,7 @@ function guardianHookHarness() {
     const id = ++nextTimer; timers.set(id, { kind, callback, delay }); return id;
   };
   let registration;
-  const source = fs.readFileSync(pluginFile, 'utf8');
+  const source = transformSource(fs.readFileSync(pluginFile, 'utf8'));
   const marker = 'return { apply, inject, GuardianPanel,';
   assert.equal(source.split(marker).length, 2, 'VM-only Hook export marker changed');
   vm.runInNewContext(source.replace(marker, 'return { useGuardian, apply, inject, GuardianPanel,'), {
@@ -382,12 +461,16 @@ function guardianHookHarness() {
     while (dirty) {
       assert.ok(++renders < 20, 'Hook scheduler must settle');
       dirty = false; cursor = 0; current = useGuardian(sessionId, api);
-      for (const effect of effects.splice(0)) effect();
+      applyingEffects = true;
+      try { for (const effect of effects.splice(0)) effect(); }
+      finally { applyingEffects = false; }
     }
     return current;
   }
   return {
     calls, timers, postUnmountWrites, render,
+    forceRender() { dirty = true; return render(); },
+    flushEffectState() { flushEffectState(); return render(); },
     get current() { return render(); },
     async settle() {
       // Drain both VM and host Promise continuations at one event-loop turn;
@@ -404,6 +487,7 @@ function guardianHookHarness() {
     unmount() {
       if (!mounted) return;
       for (const cell of cells) if (typeof cell?.cleanup === 'function') cell.cleanup();
+      pendingEffectState.length = 0;
       mounted = false;
     },
   };
@@ -498,4 +582,56 @@ test('effect cleanup fences pending old-session snapshots, configure responses a
     await afterUnmount; await hook.settle();
     assert.deepEqual(hook.postUnmountWrites, [], 'late requests perform no state writes after cleanup');
   } finally { hook.unmount(); }
+});
+
+async function assertLowRevisionSessionSwitch(hook) {
+  try {
+    hook.render('session-a'); hook.flushEffectState();
+    hook.calls[0].resolve(guardianSnapshot('session-a'));
+    await hook.settle();
+    const configureA = hook.current.change('enabled', true), mutationA = hook.calls[1];
+    assert.equal(mutationA.action, 'configure'); assert.equal(mutationA.payload.epoch, 0);
+    mutationA.resolve(guardianSnapshot('session-a', { enabled: true, epoch: 1, revision: 1 }));
+    await configureA; await hook.settle();
+    assert.equal(hook.current.value.sessionId, 'session-a');
+    assert.equal(hook.current.value.record.settings.enabled, true);
+    assert.equal(hook.current.value.record.revision, 1);
+
+    // React may leave an effect's setValue(null) queued while the parent renders
+    // the new session again. Keep that clear uncommitted to exercise the old
+    // ref/revision window rather than hiding it with an immediate mock update.
+    const firstWaitingFrame = hook.render('session-b');
+    assert.equal(firstWaitingFrame.value, null, 'the first B frame must not expose A settings');
+    const pendingB = hook.calls[2];
+    assert.equal(pendingB.action, 'snapshot'); assert.equal(pendingB.payload.sessionId, 'session-b');
+    assert.equal(pendingB.signal.aborted, false);
+    const parentRerender = hook.forceRender();
+    assert.equal(parentRerender.value, null, 'a parent rerender must not expose A while B is pending');
+    assert.equal(parentRerender.busy, false);
+    assert.equal(hook.calls.length, 3, 'the parent rerender does not restart the B request');
+    pendingB.resolve(guardianSnapshot('session-b', { enabled: false, epoch: 0, revision: 0 }));
+    await hook.settle();
+    assert.equal(hook.current.value?.sessionId, 'session-b', 'B must accept revision zero independently of A revision one');
+    assert.equal(hook.current.value.record.settings.enabled, false, 'B does not inherit the enabled A switch');
+    assert.equal(hook.current.value.record.epoch, 0);
+    assert.equal(hook.current.value.record.revision, 0);
+    assert.equal(hook.current.error, null);
+
+    const configureB = hook.current.change('enabled', true), mutationB = hook.calls[3];
+    assert.equal(mutationB.action, 'configure'); assert.equal(mutationB.payload.sessionId, 'session-b');
+    assert.equal(mutationB.payload.epoch, 0, 'B configures from its own initial epoch rather than A epoch one');
+    assert.equal(mutationB.payload.settings.enabled, true);
+    mutationB.resolve(guardianSnapshot('session-b', { enabled: true, epoch: 1, revision: 1 }));
+    await configureB; await hook.settle();
+    assert.equal(hook.current.value.sessionId, 'session-b');
+    assert.equal(hook.current.value.record.settings.enabled, true);
+    assert.equal(hook.current.value.record.epoch, 1);
+    assert.equal(hook.current.busy, false);
+  } finally { hook.unmount(); }
+  assert.equal(hook.timers.size, 0);
+  assert.deepEqual(hook.postUnmountWrites, []);
+}
+
+test('switching from enabled revision one to a fresh revision-zero session survives an extra parent render', async () => {
+  await assertLowRevisionSessionSwitch(guardianHookHarness({ deferEffectStateUpdates: true }));
 });
