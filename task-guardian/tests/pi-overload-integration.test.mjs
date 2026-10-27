@@ -134,11 +134,15 @@ async function createLoopHost(t, failures, { enabled = true } = {}) {
     const id = 'pi-overload-' + randomUUID();
     handle = await ctx.agents.create({ sessionId: id, meta: { cwd }, agentOptions: { provider: PROVIDER, model: MODEL, reasoningEffort: 'low' } });
     assert.ok(handle.agent, 'the native factory returns an AgentHandle');
-    if (enabled) {
-      const result = await guardian.configure({ sessionId: id, epoch: 0, settings: { enabled: true } });
-      assert.equal(result.record.settings.enabled, true);
-      assert.ok(result.record.revision > 0);
-      assert.equal(result.fault, null);
+    const initial = await guardian.snapshot({ sessionId: id });
+    assert.equal(initial.record.settings.enabled, true, 'an unconfigured session is guarded without a manual enable');
+    assert.equal(initial.record.settings.recoverAfterRestart, true);
+    assert.equal(initial.record.settings.autoSelectFirst, true);
+    assert.equal(initial.record.guardEnabledAt, null);
+    assert.equal(initial.fault, null);
+    if (!enabled) {
+      const result = await guardian.configure({ sessionId: id, epoch: 0, settings: { enabled: false } });
+      assert.equal(result.record.settings.enabled, false);
     }
     async function drainGuardian() {
       // Queue barriers drain already-accepted writes and their onProjection
@@ -242,7 +246,7 @@ test('enabling guarding only after a real failed turn never retroactively follow
   assert.equal(before.at(-1).type, 'turn/end');
   assert.equal(before.at(-1).data.reason.kind, 'error');
   assert.equal(before.at(-1).data.reason.error.code, 'PI_AI_ERROR');
-  const enabled = await h.guardian.configure({ sessionId: h.agent.id, epoch: 0, settings: { enabled: true } });
+  const enabled = await h.guardian.configure({ sessionId: h.agent.id, epoch: h.store.get(h.agent.id).epoch, settings: { enabled: true } });
   assert.equal(enabled.record.settings.enabled, true);
   assert.equal(enabled.lastFailure.code, 'PI_AI_ERROR');
   assert.equal(enabled.lastFailure.at, before.at(-1).time);

@@ -3,7 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
-export const DEFAULT_SETTINGS = Object.freeze({ enabled: false, recoverAfterRestart: false, autoSelectFirst: false });
+export const DEFAULT_SETTINGS = Object.freeze({ enabled: true, recoverAfterRestart: true, autoSelectFirst: true });
 export const schema = check => ({
   parse(value) { if (!check(value)) throw new Error('Task Guardian: invalid persisted data; manual inspection required.'); return structuredClone(value); },
   safeParse(value) { try { return { success: true, data: this.parse(value) }; } catch (error) { return { success: false, error }; } },
@@ -12,7 +12,7 @@ const object = value => value !== null && typeof value === 'object' && !Array.is
 export const recordSchema = schema(value => object(value) && value.version === 1 && typeof value.sessionId === 'string' && Number.isSafeInteger(value.revision) && value.revision >= 0 && Number.isSafeInteger(value.epoch) && value.epoch >= 0 && object(value.settings) && Object.keys(DEFAULT_SETTINGS).every(key => typeof value.settings[key] === 'boolean') && object(value.run) && object(value.retry) && object(value.recovery) && Array.isArray(value.audit));
 export const jsonObjectSchema = schema(object);
 export function defaultRecord(sessionId, now = Date.now()) {
-  return { version: 1, sessionId, revision: 0, epoch: 0, settings: { ...DEFAULT_SETTINGS }, updatedAt: now, run: { phase: 'idle', lastSeq: -1 }, retry: { attempt: 0, retryAt: null }, recovery: { status: 'disabled', reason: 'not_authorized' }, audit: [] };
+  return { version: 1, sessionId, revision: 0, epoch: 0, settings: { ...DEFAULT_SETTINGS }, guardEnabledAt: null, updatedAt: now, run: { phase: 'idle', lastSeq: -1 }, retry: { attempt: 0, retryAt: null }, recovery: { status: 'not_needed', reasonCode: 'no_unfinished_work', reason: '暂无待恢复的运行记录。' }, audit: [] };
 }
 export function sessionKey(id) { return createHash('sha256').update(id).digest('hex'); }
 

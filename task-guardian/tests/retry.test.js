@@ -99,7 +99,7 @@ test('classification recognizes concrete transient evidence and permanent config
   for (const code of ['SERVER', 'TIMEOUT', 'EMPTY_RESPONSE', 'STREAM_CLOSED', 'ECONNRESET', 'EAI_AGAIN']) {
     assert.equal(classifyFailure({ code }).kind, 'transient', code);
   }
-  for (const status of [408, 500, 502, 503, 504, 599]) {
+  for (const status of [408, 502, 503, 504]) {
     assert.equal(classifyFailure({ code: 'OTHER', status }).kind, 'transient', String(status));
     assert.equal(classifyFailure({ code: `HTTP_${status}` }).kind, 'transient');
   }
@@ -170,7 +170,7 @@ test('generic transport failures stop while concrete reset and stream idle timeo
   }
 });
 
-test('generic PI failures accept only explicit provider overload evidence with permanent precedence', () => {
+test('PI overload evidence and explicit HTTP status stay distinct, with permanent precedence', () => {
   const exact = 'server_error: Our servers are currently overloaded. Please try again later.';
   const accepted = [exact,
     'server_error: Our servers are temporarily overloaded. Please try again later.',
@@ -189,9 +189,10 @@ test('generic PI failures accept only explicit provider overload evidence with p
     'server_error: Something went wrong', 'server_error', 'internal_error',
     'internal_error: Our servers are currently overloaded. Please try again later.',
     'Our servers are currently overloaded. Please try again later.',
-    'server_error: Our servers are not overloaded.', 'server_error: temporarily unavailable.',
+    'server_error: Our servers are not overloaded.',
     'server_error: overload protection is disabled.']) {
-    for (const status of [undefined, 503]) assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message, status }).kind, 'unknown', message);
+    assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message }).kind, 'unknown', message);
+    assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message, status: 503 }).kind, 'transient', 'retained HTTP 503 is independent evidence: ' + message);
   }
   for (const [message, reason] of [
     ['server_error: invalid api key', 'authentication'],
@@ -205,6 +206,115 @@ test('generic PI failures accept only explicit provider overload evidence with p
   assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message: exact, status: 401 }).kind, 'permanent');
   assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message: exact, status: 418 }).kind, 'unknown');
   assert.equal(classifyFailure({ code: 'SERVER', message: 'Generic server error' }).kind, 'transient');
+});
+
+test('PI retained provider evidence covers confirmed gateway capacity, server, timeout and transport cases', () => {
+  const concurrency = 'Concurrency limit exceeded for user, please retry later';
+  const cases = [
+    [{ message: 'gateway_concurrency_limit: ' + concurrency }, 'concurrency-limit'],
+    [{ message: 'Error Code gateway_concurrency_limit: ' + concurrency }, 'concurrency-limit'],
+    [{ message: concurrency }, 'concurrency-limit'],
+    [{ message: JSON.stringify({ error: { type: 'rate_limit_error', code: 'gateway_concurrency_limit', message: concurrency } }) }, 'concurrency-limit'],
+    [{ message: JSON.stringify({ type: 'response.failed', response: { error: { code: 'gateway_concurrency_limit', message: concurrency } } }) }, 'concurrency-limit'],
+    [{ message: 'gateway_queue_full: Too many pending requests, please retry later' }, 'concurrency-limit'],
+    [{ message: JSON.stringify({ error: { code: 'gateway_queue_full', message: 'Too many pending requests, please retry later' } }) }, 'concurrency-limit'],
+    [{ message: 'gateway_rate_limit: User requests-per-minute limit exceeded, please retry later' }, 'rate-limit'],
+    [{ message: 'rate_limit_exceeded: Group requests-per-minute limit exceeded' }, 'rate-limit'],
+    [{ message: 'server_is_overloaded: Provider capacity exhausted' }, 'server-overloaded'],
+    [{ message: 'slow_down: Please slow down your requests' }, 'server-overloaded'],
+    [{ message: 'Error Code slow_down: Please retry later' }, 'server-overloaded'],
+    [{ message: 'server_error: The server is overloaded.' }, 'server-overloaded'],
+    [{ message: 'server_error: Please slow down your requests.' }, 'server-overloaded'],
+    [{ status: 408, message: 'Request failed' }, 'timeout'],
+    [{ status: 502, message: 'Gateway failure' }, 'server-error'],
+    [{ status: 503, message: 'Provider unavailable' }, 'server-error'],
+    [{ status: 504, message: 'Gateway failure' }, 'timeout'],
+    [{ status: 500, message: 'server_error: Internal provider failure' }, 'server-error'],
+    [{ message: '503: ' + JSON.stringify({ error: { type: 'server_error', message: 'Service unavailable' } }) }, 'server-error'],
+    [{ message: 'OpenAI API error (503): Unknown provider detail' }, 'server-error'],
+    [{ message: 'HTTP/1.1 503 Service Unavailable' }, 'server-error'],
+    [{ message: JSON.stringify({ error: { status: 504, code: 'timeout_error', message: 'Gateway timeout' } }) }, 'timeout'],
+    [{ message: 'timeout_error: Request timed out' }, 'timeout'],
+    [{ message: 'stream_timeout: Upstream response stream timed out' }, 'timeout'],
+    [{ message: 'first_output_timeout: Upstream produced no output before the deadline' }, 'timeout'],
+    [{ message: 'openai_silent_refusal: empty completion without usage' }, 'empty-response'],
+    [{ message: 'Error Code stream_idle_timeout: Model stream idle timeout' }, 'timeout'],
+    [{ message: 'Model response stream idle timeout' }, 'timeout'],
+    [{ message: 'read ECONNRESET' }, 'transport-reset'],
+    [{ message: JSON.stringify({ error: { code: 'EPIPE', message: 'Broken pipe' } }) }, 'transport-reset'],
+    [{ message: 'socket hangup' }, 'transport-reset'],
+    [{ message: 'getaddrinfo EAI_AGAIN provider.example' }, 'temporary-dns'],
+    [{ message: 'upstream_http2_stream_error: Upstream HTTP/2 stream failed' }, 'transport-reset'],
+    [{ message: 'upstream_stream_read_error: Upstream response stream was interrupted' }, 'transport-reset'],
+    [{ message: 'upstream_stream_truncated: Upstream response stream ended before completion' }, 'transport-reset'],
+    [{ status: 503, message: 'API_KEY_AUTH_OVERLOADED: API key authentication is temporarily unavailable' }, 'server-error'],
+    [{ message: 'api_key_auth_overloaded: API key authentication is temporarily unavailable' }, 'server-error'],
+    [{ status: 503, message: 'billing_service_error: Billing service temporarily unavailable. Please retry later.' }, 'server-error'],
+    [{ message: JSON.stringify({ error: { code: 'billing_service_error', message: 'Billing service temporarily unavailable. Please retry later.' } }) }, 'server-error'],
+  ];
+  for (const [retained, reason] of cases) {
+    const result = classifyFailure({ code: 'PI_AI_ERROR', ...retained });
+    assert.equal(result.kind, 'transient', JSON.stringify(retained));
+    assert.equal(result.reason, reason, JSON.stringify(retained));
+  }
+});
+
+test('PI gateway prefixes cannot override permanent errors, spending limits or unsupported execution states', () => {
+  const capacity = 'gateway_concurrency_limit: Concurrency limit exceeded for user, please retry later. ';
+  const permanent = [
+    ['authentication_failed: Credentials rejected', 'authentication'],
+    ['permission_error: Image generation is not enabled for this group', 'permission'],
+    [capacity + 'Image generation is not enabled for this group', 'permission'],
+    [capacity + 'Invalid API key', 'authentication'],
+    [capacity + 'Upstream authorization expired', 'authentication'],
+    [capacity + 'OAuth token has expired', 'authentication'],
+    [capacity + 'insufficient_balance', 'quota'],
+    [capacity + 'daily usage limit exceeded', 'quota'],
+    [capacity + 'weekly usage limit exceeded', 'quota'],
+    [capacity + 'monthly usage limit exceeded', 'quota'],
+    [capacity + 'daily spending limit reached', 'quota'],
+    [capacity + 'api key 5小时限额已用完', 'quota'], [capacity + 'api key 日限额已用完', 'quota'],
+    [capacity + 'api key 7天限额已用完', 'quota'], [capacity + 'API key 额度已用完', 'quota'],
+    ['rate_limit_exceeded: Daily usage quota exhausted for this platform.', 'quota'],
+    ['rate_limit_exceeded: Weekly usage quota exhausted for this platform.', 'quota'],
+    ['rate_limit_exceeded: Monthly usage quota exhausted for this platform.', 'quota'],
+    [capacity + 'content_policy_violation', 'content-restriction'],
+    [capacity + 'Model does not exist', 'model-unavailable'],
+    [capacity + 'Invalid provider configuration', 'request-configuration'],
+    [capacity + 'certificate has expired', 'tls-configuration'],
+  ];
+  for (const [message, reason] of permanent) {
+    const result = classifyFailure({ code: 'PI_AI_ERROR', message, status: 503 });
+    assert.equal(result.kind, 'permanent', message); assert.equal(result.reason, reason, message);
+  }
+  for (const code of ['USAGE_LIMIT_EXCEEDED', 'QUOTA_EXHAUSTED', 'API_KEY_EXPIRED', 'INSUFFICIENT_BALANCE', 'API_KEY_RATE_5H_EXCEEDED', 'API_KEY_RATE_1D_EXCEEDED', 'API_KEY_RATE_7D_EXCEEDED', 'API_KEY_QUOTA_EXHAUSTED', 'USER_PLATFORM_DAILY_QUOTA_EXHAUSTED', 'USER_PLATFORM_WEEKLY_QUOTA_EXHAUSTED', 'USER_PLATFORM_MONTHLY_QUOTA_EXHAUSTED']) {
+    const result = classifyFailure({ code: 'PI_AI_ERROR', status: 503, message: JSON.stringify({ error: { code, message: capacity } }) });
+    assert.equal(result.kind, 'permanent', code);
+  }
+  for (const message of [
+    'Please retry later', 'Unclassified PI provider failure', 'server_error: Something went wrong',
+    'rate_limit_exceeded: Too many requests', 'gateway_rate_limit: Request rejected',
+    'pi-ai stream for model "example" ended pending', 'pi-ai deferred response for model "example" is not supported',
+    'request_error: ' + capacity, 'schema_error: ' + capacity, 'tool_execution_error: ' + capacity, 'business_error: ' + capacity,
+    'context canceled', 'openai_silent_refusal: Provider refusal', 'Provider refused the request',
+    capacity + '... [truncated 400 chars]',
+    '{"error":{"code":"gateway_concurrency_limit","message":"' + capacity,
+    JSON.stringify({ error: { code: 'unrecognized', message: 'Unknown failure' }, request: { status: 503, code: 'ECONNRESET', message: capacity } }),
+    JSON.stringify({ error: { code: 'unrecognized', message: 'Unknown failure' }, metadata: { response: { error: { code: 'gateway_concurrency_limit', message: capacity } } } }),
+  ]) assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message }).kind, 'unknown', message);
+  for (const message of ['request_error: ' + capacity, 'schema_error: ' + capacity, 'tool_execution_error: ' + capacity,
+    'business_error: ' + capacity, 'pi-ai stream for model "example" ended pending', 'context canceled']) {
+    assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message, status: 503 }).kind, 'unknown', message);
+  }
+  assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message: 'upstream_error: Upstream request failed', status: 502 }).kind, 'unknown');
+  assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message: 'Unknown', status: 429 }).kind, 'unknown');
+  for (const status of [500, 599]) assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message: 'Unclassified server response', status }).kind, 'unknown');
+  for (const status of [501, 505]) assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message: capacity, status }).kind, 'permanent');
+  assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message: capacity, status: 499 }).kind, 'unknown');
+  for (const message of ['billing_service_error: Billing service temporarily unavailable. Insufficient balance.',
+    'api_key_auth_overloaded: API key authentication is temporarily unavailable. Invalid API key.']) {
+    assert.equal(classifyFailure({ code: 'PI_AI_ERROR', message, status: 503 }).kind, 'permanent', message);
+  }
 });
 
 test('explicit content restrictions outrank PI overload and HTTP 503 without treating generic policy text as permanent', async t => {

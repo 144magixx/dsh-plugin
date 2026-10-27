@@ -10,6 +10,9 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { openArchive } from '../../session-summary/scripts/extract-test-runtime.mjs';
+import { DEFAULT_SETTINGS, defaultRecord } from '../lib/store.js';
+
+assert.deepEqual(DEFAULT_SETTINGS, { enabled: true, recoverAfterRestart: true, autoSelectFirst: true }, 'new sessions must default all three guardian settings on');
 
 const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repo = path.dirname(workspace);
@@ -66,7 +69,7 @@ function buildFixture() {
       `inject(name, factory) { const dispose=factory(); return ctx.effect(()=>dispose) },
       register(options, component) { const entry={options,component}; const entries=registrations.get(options.name)||[]; registrations.set(options.name,[...entries,entry]); publishRegistry(); let live=true; return () => { if(!live)return;live=false; const next=(registrations.get(options.name)||[]).filter(value=>value!==entry); if(next.length)registrations.set(options.name,next);else registrations.delete(options.name);publishRegistry() } },`);
     fixture = replaceOnce(fixture, "const transport = async (url, init = {}) => {\n    const payload = JSON.parse(init.body ?? '{}')", `function guardianSnapshot(id) {
-    if(!guardianRecords.has(id)) guardianRecords.set(id,{version:1,sessionId:id,revision:0,epoch:0,settings:{enabled:false,recoverAfterRestart:false,autoSelectFirst:false},run:{phase:'idle',lastSeq:-1},retry:{attempt:0,retryAt:null},recovery:{status:'disabled',reason:'not authorized'},audit:[]});
+    if(!guardianRecords.has(id)) guardianRecords.set(id,{version:1,sessionId:id,revision:0,epoch:0,settings:${JSON.stringify(DEFAULT_SETTINGS)},run:{phase:'idle',lastSeq:-1},retry:{attempt:0,retryAt:null},recovery:${JSON.stringify(defaultRecord('browser-defaults-only', 0).recovery)},audit:[]});
     return {ok:true,sessionId:id,record:structuredClone(guardianRecords.get(id)),questions:[],compatibility:{supported:true,version:'0.2.1-rc.3'},fault:null,startup:{enabled:false,supported:false},serverNow:Date.now()};
   }
   const transport = async (url, init = {}) => {
@@ -75,7 +78,7 @@ function buildFixture() {
     if(String(url).startsWith('/api/task-guardian/')) {
       const action=String(url).split('/').at(-1);guardianCalls.push({action,payload:structuredClone(payload)});
       if(!['session-main','session-other'].includes(payload.sessionId))throw Error('Unknown fixture session');
-      if(action==='configure') { const value=guardianSnapshot(payload.sessionId).record;if(payload.epoch!==value.epoch)return {ok:false,status:409,json:async()=>({ok:false,error:'settings_changed_reload'})};Object.assign(value.settings,payload.settings);value.epoch++;value.revision++;guardianRecords.set(payload.sessionId,value); }
+      if(action==='configure') { const value=guardianSnapshot(payload.sessionId).record;if(payload.epoch!==value.epoch)return {ok:false,status:409,json:async()=>({ok:false,error:'settings_changed_reload'})};Object.assign(value.settings,payload.settings);value.recovery=value.settings.enabled&&value.settings.recoverAfterRestart?${JSON.stringify(defaultRecord('browser-defaults-only', 0).recovery)}:{status:'disabled',reason:'Task Guardian is off.'};value.epoch++;value.revision++;guardianRecords.set(payload.sessionId,value); }
       else if(action!=='snapshot')throw Error('Only local read/configure permitted');
       return {ok:true,status:200,json:async()=>guardianSnapshot(payload.sessionId)};
     }`);
@@ -151,20 +154,22 @@ try {
   await resize(1440, 900); await call('Page.navigate', { url: page });
   await waitFor(`!!${fixture} && !!document.querySelector('[data-dsh-session-summary]') && !!document.querySelector('.dtg-accessory') && !document.querySelector('.dtg-switch').disabled`); await settle();
   await check('real installed React and actual product GuardianAccessory render', `window.__shared.react.version==='18.3.1' && !!document.querySelector('.dsc-accessories > .dtg-accessory') && document.querySelector('.dtg-entry').textContent.includes('任务守护') && document.querySelector('.dsc-trigger').textContent.includes('外部能力')`);
-  await check('initial title, switch and state are all visible', `(()=>{const e=document.querySelector('.dtg-accessory');return e.textContent.includes('守护已关闭') && e.querySelector('[role=switch]').getAttribute('aria-checked')==='false' && e.querySelector('.dtg-entry').getClientRects().length>0})()`);
+  await check('initial title, default-on switch and enabled state are all visible', `(()=>{const e=document.querySelector('.dtg-accessory');return e.textContent.includes('守护已开启') && e.querySelector('[role=switch]').getAttribute('aria-checked')==='true' && e.querySelector('.dtg-entry').getClientRects().length>0})()`);
+  await check('fresh main session defaults all three guardian settings on while startup remains off', `(()=>{const s=${fixture}.guardianSnapshot('session-main');return s.record.epoch===0&&s.record.revision===0&&s.record.settings.enabled===true&&s.record.settings.recoverAfterRestart===true&&s.record.settings.autoSelectFirst===true&&s.startup.enabled===false&&${fixture}.guardianCalls.every(call=>call.action==='snapshot')})()`);
   await geometry('1440x900 initial'); await shot('guardian-accessory-wide.png');
   await click('.dtg-entry');
   await check('title opens only native task-guardian kind for current session', `${fixture}.tabOpens.length===1 && ${fixture}.tabOpens[0].kind==='task-guardian' && ${fixture}.tabOpens[0].sessionId==='session-main'`);
   await click('.dtg-switch');
-  await check('main switch configures only current session and updates status', `${fixture}.guardianCalls.filter(x=>x.action==='configure').length===1 && ${fixture}.guardianCalls.find(x=>x.action==='configure').payload.sessionId==='session-main' && ${fixture}.guardianSnapshot('session-main').record.settings.enabled && document.querySelector('.dtg-switch').getAttribute('aria-checked')==='true' && document.querySelector('.dtg-status').textContent.includes('守护已开启')`);
+  await check('main switch explicitly disables only current session and updates status', `${fixture}.guardianCalls.filter(x=>x.action==='configure').length===1 && ${fixture}.guardianCalls.find(x=>x.action==='configure').payload.sessionId==='session-main' && ${fixture}.guardianCalls.find(x=>x.action==='configure').payload.settings.enabled===false && !${fixture}.guardianSnapshot('session-main').record.settings.enabled && document.querySelector('.dtg-switch').getAttribute('aria-checked')==='false' && document.querySelector('.dtg-status').textContent.includes('守护已关闭')`);
   await evaluate(`${fixture}.switchSession('session-other')`); await settle();
   await waitFor(`document.querySelector('.dtg-accessory')?.dataset.taskGuardian==='session-other' && !document.querySelector('.dtg-switch').disabled`);
-  await check('switching sessions retains independent off state', `document.querySelector('.dtg-switch').getAttribute('aria-checked')==='false' && !${fixture}.guardianSnapshot('session-other').record.settings.enabled && ${fixture}.guardianSnapshot('session-main').record.settings.enabled`);
+  await check('new session remains default-on independently of the saved main off setting', `(()=>{const s=${fixture}.guardianSnapshot('session-other');return document.querySelector('.dtg-switch').getAttribute('aria-checked')==='true'&&s.record.epoch===0&&s.record.settings.enabled===true&&s.record.settings.recoverAfterRestart===true&&s.record.settings.autoSelectFirst===true&&s.startup.enabled===false&&!${fixture}.guardianSnapshot('session-main').record.settings.enabled})()`);
   await click('.dtg-switch');
-  await check('second session configure uses its own epoch and identity', `(()=>{const calls=${fixture}.guardianCalls.filter(x=>x.action==='configure');return calls.length===2&&calls[1].payload.sessionId==='session-other'&&calls[1].payload.epoch===0&&calls[1].payload.settings.enabled===true})()`);
+  await check('second session disable uses its own epoch and identity', `(()=>{const calls=${fixture}.guardianCalls.filter(x=>x.action==='configure');return calls.length===2&&calls[1].payload.sessionId==='session-other'&&calls[1].payload.epoch===0&&calls[1].payload.settings.enabled===false})()`);
   await evaluate(`${fixture}.switchSession('session-main')`); await settle(); await waitFor(`document.querySelector('.dtg-accessory')?.dataset.taskGuardian==='session-main' && !document.querySelector('.dtg-switch').disabled`);
+  await check('returning to main retains its saved off setting before another click', `document.querySelector('.dtg-switch').getAttribute('aria-checked')==='false'&&!${fixture}.guardianSnapshot('session-main').record.settings.enabled&&!${fixture}.guardianSnapshot('session-other').record.settings.enabled`);
   await click('.dtg-switch');
-  await check('returning and disabling one session leaves the other enabled', `!${fixture}.guardianSnapshot('session-main').record.settings.enabled && ${fixture}.guardianSnapshot('session-other').record.settings.enabled`);
+  await check('returning and enabling one session leaves the other explicitly off', `${fixture}.guardianSnapshot('session-main').record.settings.enabled && document.querySelector('.dtg-switch').getAttribute('aria-checked')==='true' && !${fixture}.guardianSnapshot('session-other').record.settings.enabled`);
   const initial = await box('[data-dsh-session-summary]');
   await evaluate(`${fixture}.summaryLong()`); await settle();
   const grown = await box('[data-dsh-session-summary]');
@@ -186,11 +191,15 @@ try {
   await check('unloading guardian removes only its accessory and clock timers', `!document.querySelector('.dtg-accessory') && !!document.querySelector('.dsc-trigger') && ${fixture}.timerState().intervals.length===0`, JSON.stringify({ mountedTimers, afterGuardianUnload: await evaluate(`${fixture}.timerState()`) }));
   await evaluate(`${fixture}.reinstallGuardian()`); await settle(); await waitFor(`!!document.querySelector('.dtg-accessory') && !document.querySelector('.dtg-switch').disabled`);
   await check('guardian reinstall creates exactly one card and one one-second clock', `document.querySelectorAll('.dtg-accessory').length===1 && ${fixture}.timerState().intervals.filter(ms=>ms===1000).length===1`);
+  await evaluate(`${fixture}.switchSession('session-other')`); await settle(); await waitFor(`document.querySelector('.dtg-accessory')?.dataset.taskGuardian==='session-other' && !document.querySelector('.dtg-switch').disabled`);
+  await check('saved off remains off after guardian unload and reinstall', `document.querySelector('.dtg-switch').getAttribute('aria-checked')==='false'&&${fixture}.guardianSnapshot('session-other').record.settings.enabled===false&&${fixture}.guardianSnapshot('session-other').record.epoch===1&&${fixture}.guardianSnapshot('session-main').record.settings.enabled===true&&${fixture}.guardianCalls.filter(call=>call.action==='configure').length===3`);
+  await evaluate(`${fixture}.switchSession('session-main')`); await settle(); await waitFor(`document.querySelector('.dtg-accessory')?.dataset.taskGuardian==='session-main' && !document.querySelector('.dtg-switch').disabled`);
   await evaluate(`${fixture}.uninstall()`); await settle();
   await check('capability unload restores root reserve and removes both controls', `!document.querySelector('.dsc-trigger')&&!document.querySelector('.dtg-accessory')&&!document.documentElement.style.getPropertyValue('--dsh-summary-accessory-height')&&!document.querySelector('style[data-plugin=dsh-capability-selector]')`);
   await evaluate(`${fixture}.reinstall()`); await settle(); await waitFor(`!!document.querySelector('.dtg-accessory') && !document.querySelector('.dtg-switch').disabled`);
   await check('whole reinstall creates one capability control and one guardian card', `document.querySelectorAll('.dsc-trigger').length===1&&document.querySelectorAll('.dtg-accessory').length===1&&document.querySelectorAll('style[data-plugin=dsh-capability-selector]').length===1`);
   await geometry('reinstalled');
+  await check('recovery and auto-answer preferences remain on, startup stays off and no execution actions are invoked', `['session-main','session-other'].every(id=>{const s=${fixture}.guardianSnapshot(id);return s.record.settings.recoverAfterRestart===true&&s.record.settings.autoSelectFirst===true&&s.startup.enabled===false})&&${fixture}.guardianCalls.every(call=>call.action==='snapshot'||call.action==='configure'&&Object.keys(call.payload.settings).length===1&&Object.hasOwn(call.payload.settings,'enabled'))&&${fixture}.guardianSnapshot('session-other').record.settings.enabled===false`);
   await check('fixture and browser report no errors', `${fixture}.errors.length===0 && !document.querySelector('.dtg-accessory [role=alert]')`, JSON.stringify(browserErrors));
   await evaluate(`${fixture}.uninstall();${fixture}.unmount()`); await settle();
   const afterUnmount = await evaluate(`${fixture}.timerState()`);

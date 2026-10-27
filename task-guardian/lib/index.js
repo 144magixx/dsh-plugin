@@ -105,7 +105,7 @@ export function createGuardianService(ctx, { now = Date.now, leaseFactory = acqu
       const questions = questionViews(projections?.[QUESTIONS], record.settings, now());
       const ended = lifecycle?.turn === null ? lifecycle.lastTurnEnd : null;
       const firstGrant = record.settings.enabled && record.epoch === 1 ? record.audit.find(entry => entry.kind === 'user_settings_changed') : undefined;
-      const guardEnabledAt = record.guardEnabledAt ?? firstGrant?.at ?? null;
+      const guardEnabledAt = Object.hasOwn(record, 'guardEnabledAt') ? record.guardEnabledAt : firstGrant?.at ?? null;
       const lastFailure = ended?.reason?.kind === 'error' ? { at: ended.time, code: ended.reason.error?.code ?? null, guardEnabledAt, beforeGuardEnabled: Number.isFinite(guardEnabledAt) && ended.time < guardEnabledAt } : null;
       const startup = store.getStartup();
       let startupSupported = false;

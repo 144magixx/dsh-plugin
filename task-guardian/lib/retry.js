@@ -25,10 +25,12 @@ export function parseRetryAfter(value, { nowMs = Date.now() } = {}) {
 
 const PERMANENT_CODES = new Map([
   ['AUTH', 'authentication'], ['UNAUTHORIZED', 'authentication'],
-  ['AUTHENTICATION_ERROR', 'authentication'], ['INVALID_API_KEY', 'authentication'],
+  ['AUTHENTICATION_ERROR', 'authentication'], ['AUTHENTICATION_FAILED', 'authentication'], ['INVALID_API_KEY', 'authentication'], ['API_KEY_EXPIRED', 'authentication'],
   ['PERMISSION_ERROR', 'permission'], ['PERMISSION_DENIED', 'permission'],
   ['QUOTA', 'quota'], ['INSUFFICIENT_QUOTA', 'quota'], ['QUOTA_EXCEEDED', 'quota'],
-  ['INSUFFICIENT_BALANCE', 'quota'], ['BILLING_HARD_LIMIT_REACHED', 'quota'],
+  ['INSUFFICIENT_BALANCE', 'quota'], ['BILLING_HARD_LIMIT_REACHED', 'quota'], ['USAGE_LIMIT_EXCEEDED', 'quota'], ['QUOTA_EXHAUSTED', 'quota'],
+  ['API_KEY_RATE_5H_EXCEEDED', 'quota'], ['API_KEY_RATE_1D_EXCEEDED', 'quota'], ['API_KEY_RATE_7D_EXCEEDED', 'quota'],
+  ['API_KEY_QUOTA_EXHAUSTED', 'quota'], ['USER_PLATFORM_DAILY_QUOTA_EXHAUSTED', 'quota'], ['USER_PLATFORM_WEEKLY_QUOTA_EXHAUSTED', 'quota'], ['USER_PLATFORM_MONTHLY_QUOTA_EXHAUSTED', 'quota'],
   ['INVALID_REQUEST', 'invalid-request'], ['INVALID_REQUEST_ERROR', 'invalid-request'],
   ['BAD_REQUEST', 'invalid-request'], ['INVALID_ARGUMENT', 'invalid-request'], ['EINVAL', 'invalid-request'],
   ['CONTEXT_WINDOW_EXCEEDED', 'context-window'], ['CONTEXT_LENGTH_EXCEEDED', 'context-window'],
@@ -65,42 +67,73 @@ const normalizedCode = code => code.trim().toUpperCase().replace(/[\s.-]+/gu, '_
  * incomplete evidence must never grant an automatic retry.
  */
 function failureEvidence(failure) {
-  const codes = new Set(), texts = new Set(), seen = new WeakSet();
+  const codes = new Set(), temporaryCodes = new Set(), texts = new Set(), temporaryTexts = new Set(), statuses = new Set();
+  const seen = new WeakMap(), analysedTexts = new Set();
+  const containers = new Set(['error', 'errors', 'response', 'cause', 'inner', 'detail', 'details', 'data']);
   let remaining = 65_536, nodes = 0, incomplete = false;
-  function text(value, depth) {
-    if (texts.has(value)) return;
-    if (value.length > remaining) { incomplete = true; return; }
-    remaining -= value.length;
-    texts.add(value);
+  const retainStatus = value => { if (typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599) statuses.add(value); };
+  function code(value, trusted) {
+    const normalized = normalizedCode(value); codes.add(normalized);
+    if (trusted) {
+      temporaryCodes.add(normalized);
+      const statusCode = /^(?:HTTP_)?([1-5]\d{2})$/u.exec(normalized);
+      if (statusCode) retainStatus(Number(statusCode[1]));
+    }
+  }
+  function text(value, depth, trusted) {
+    const analysisKey = `${trusted ? 1 : 0}:${value}`;
+    if (analysedTexts.has(analysisKey)) return;
+    analysedTexts.add(analysisKey);
+    if (!texts.has(value)) {
+      if (value.length > remaining) { incomplete = true; return; }
+      remaining -= value.length; texts.add(value);
+    }
+    if (/\[truncated(?:\s+\d+\s+chars)?\]/iu.test(value)) incomplete = true;
     const trimmed = value.trim();
-    const start = trimmed.indexOf('{');
-    const json = /^[{[]/u.test(trimmed) ? trimmed
-      : start >= 0 && trimmed.endsWith('}') ? trimmed.slice(start) : undefined;
+    // These are the two prefix styles produced by pi-ai response.failed/error.
+    const prefix = /^(?:Error Code\s+)?([A-Za-z][A-Za-z0-9_.-]{0,95})\s*:/iu.exec(trimmed);
+    if (prefix) code(prefix[1], trusted);
+    if (trusted) {
+      // The SDK HTTP formatter preserves `503: body` or `Provider API error (503): body`.
+      const status = /^(?:HTTP(?:\/\d(?:\.\d)?)?\s+)?([1-5]\d{2})(?:\s*:|\s+[A-Za-z])/iu.exec(trimmed)
+        ?? /^[^()\n]{1,100} API error\s*\(([1-5]\d{2})\)\s*:/iu.exec(trimmed);
+      if (status) retainStatus(Number(status[1]));
+    }
+    const start = trimmed.search(/[{[]/u);
+    const json = start >= 0 ? trimmed.slice(start) : undefined;
     if (json) {
-      try { visit(JSON.parse(json), depth + 1); }
-      catch { /* Plain provider text is still examined conservatively below. */ }
-    }
+      try { visit(JSON.parse(json), depth + 1, trusted); }
+      catch { incomplete = true; }
+    } else if (trusted) temporaryTexts.add(prefix ? trimmed.slice(prefix[0].length).trim() : value);
   }
-  function visit(value, depth) {
-    if (!value || typeof value !== 'object' || seen.has(value)) return;
+  function visit(value, depth, trusted) {
+    if (!value || typeof value !== 'object') return;
+    const mask = trusted ? 2 : 1;
+    if ((seen.get(value) ?? 0) & mask) return;
     if (depth > 8 || ++nodes > 256) { incomplete = true; return; }
-    seen.add(value);
+    seen.set(value, (seen.get(value) ?? 0) | mask);
+    if (trusted) for (const key of ['status', 'status_code', 'statusCode', 'http_status', 'httpStatusCode']) retainStatus(value[key]);
     for (const key of CODE_FIELDS) if (typeof value[key] === 'string') {
-      text(value[key], depth);
-      codes.add(normalizedCode(value[key]));
+      text(value[key], depth, false); code(value[key], trusted);
     }
-    for (const key of TEXT_FIELDS) if (typeof value[key] === 'string') text(value[key], depth);
-    for (const nested of Object.values(value)) if (nested && typeof nested === 'object') visit(nested, depth + 1);
+    for (const key of TEXT_FIELDS) if (typeof value[key] === 'string') text(value[key], depth, trusted);
+    for (const [key, nested] of Object.entries(value)) {
+      const childTrusted = trusted && (containers.has(key) || Array.isArray(value));
+      if (nested && typeof nested === 'object') visit(nested, depth + 1, childTrusted);
+      else if (childTrusted && typeof nested === 'string') text(nested, depth + 1, true);
+    }
   }
-  visit({ code: failure.code, message: failure.message, type: failure.type }, 0);
-  return {
-    codes,
-    text: [...texts].map(value => value.toLowerCase().replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ')).join('\n'),
-    incomplete,
-  };
+  visit({ code: failure.code, message: failure.message, type: failure.type, status: failure.status }, 0, true);
+  const normalizeTexts = values => [...values].map(value => value.toLowerCase().replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ')).join('\n');
+  return { codes, temporaryCodes, text: normalizeTexts(texts), temporaryText: normalizeTexts(temporaryTexts), statuses, incomplete };
 }
 
 function permanentTextReason(text) {
+  if (/api key\s*(?:(?:5小时|日|7天)限额已用完|额度已用完)/u.test(text)) return 'quota';
+  if (/\b(?:(?:daily|weekly|monthly|annual|yearly|5h|1d|7d) (?:usage|spending|consumption|quota|budget) (?:limit )?(?:exceeded|exhausted|reached)|(?:usage|spending) (?:hard )?limit (?:exceeded|exhausted|reached))\b/u.test(text)) return 'quota';
+  if (/\b(?:image generation is not (?:enabled|allowed) for (?:this|the) group|feature (?:is )?disabled for (?:this|the) group)\b/u.test(text)) return 'permission';
+  if (/\b(?:(?:oauth|access|refresh|bearer) token (?:is |has )?(?:invalid|expired|revoked|missing)|upstream auth(?:entication|orization)? (?:has |is )?(?:failed|expired|denied|invalid))\b/u.test(text)) return 'authentication';
+  if (/\b(?:not implemented|http version not supported|unsupported api (?:endpoint|version))\b/u.test(text)) return 'request-configuration';
   if (/\b(?:content policy (?:violation|error)|policy violation|safety (?:policy violation|refusal|violation)|prohibited content|(?:blocked|rejected|refused) (?:by|due to|under) (?:(?:the|a|our) )?(?:content filter|content policy)|content filter\s*:\s*(?:blocked|rejected|refused))\b|内容(?:审核|审查|过滤|安全(?:策略|政策)?)[^\n]{0,16}(?:拦截|阻止|拒绝|不通过|未通过)|(?:违反|触发)[^\n]{0,12}(?:内容政策|内容安全策略|安全政策)|违规内容|内容不合规/u.test(text)) return 'content-restriction';
   if (/\b(?:insufficient (?:quota|balance|credits?)|quota (?:exceeded|exhausted)|billing hard limit|credit balance (?:is )?(?:too low|insufficient)|(?:account |credit )?balance (?:is )?(?:insufficient|exhausted)|(?:run out of|out of) credits?)\b|余额不足|额度(?:不足|耗尽|用尽)|欠费|配额(?:不足|耗尽|用尽)/u.test(text)) return 'quota';
   if (/\b(?:invalid|missing|expired|incorrect|revoked) (?:api )?(?:key|token|credentials?)\b|\b(?:api key|access token) (?:is |has )?(?:invalid|expired|missing|revoked)\b|\b(?:unauthorized|authentication (?:failed|required|error))\b|认证失败|鉴权失败|密钥(?:无效|过期)|无效的?(?:密钥|api.?key)/u.test(text)) return 'authentication';
@@ -116,12 +149,22 @@ function permanentTextReason(text) {
 }
 
 function providerOverloadEvidence(evidence) {
-  if (evidence.codes.has('OVERLOADED_ERROR')) return true;
-  // PI adapters retain the provider's text but replace its structured code.
-  // Require a provider error prefix and an explicit positive overload statement;
-  // a bare server_error/internal_error or a generic PI failure is insufficient.
-  return /(?:^|\n)\s*server error\s*:\s*(?:our servers? (?:are|is) (?:(?:currently|temporarily) )?overloaded|(?:the )?(?:servers?|service) (?:are|is) temporarily overloaded|temporarily overloaded)(?:[.!,:;\s]|$)/u.test(evidence.text);
+  const text = evidence.temporaryText;
+  if (/\b(?:not overloaded|no overload|overload protection is disabled)\b/u.test(text)) return false;
+  if (['OVERLOADED_ERROR', 'SERVER_IS_OVERLOADED', 'SLOW_DOWN'].some(code => evidence.temporaryCodes.has(code))) return true;
+  return evidence.temporaryCodes.has('SERVER_ERROR')
+    && /\b(?:our servers? (?:are|is) (?:(?:currently|temporarily) )?overloaded|(?:the )?(?:servers?|service) (?:are|is) (?:(?:currently|temporarily) )?overloaded|(?:^|\n)\s*(?:temporarily overloaded|(?:please )?slow down(?: your requests)?))(?:[.!,:;\s]|$)/u.test(text);
 }
+
+const NON_MODEL_ERROR_CODES = new Set(['REQUEST_ERROR', 'SCHEMA_ERROR', 'SCHEMA_VALIDATION_ERROR', 'VALIDATION_ERROR', 'TOOL_ERROR', 'TOOL_EXECUTION_ERROR', 'BUSINESS_ERROR', 'BUSINESS_RULE_ERROR', 'PENDING', 'DEFERRED', 'INCOMPLETE']);
+const SPECIFIC_TRANSIENT_CODES = new Map([
+  ['TIMEOUT', 'timeout'], ['TIMEOUT_ERROR', 'timeout'], ['REQUEST_TIMEOUT', 'timeout'],
+  ['GATEWAY_TIMEOUT', 'timeout'], ['STREAM_IDLE_TIMEOUT', 'timeout'], ['STREAM_TIMEOUT', 'timeout'], ['FIRST_OUTPUT_TIMEOUT', 'timeout'], ['ETIMEDOUT', 'timeout'],
+  ['UND_ERR_CONNECT_TIMEOUT', 'timeout'], ['UND_ERR_HEADERS_TIMEOUT', 'timeout'], ['UND_ERR_BODY_TIMEOUT', 'timeout'],
+  ['ECONNRESET', 'transport-reset'], ['EPIPE', 'transport-reset'], ['UND_ERR_SOCKET', 'transport-reset'],
+  ['EAI_AGAIN', 'temporary-dns'], ['EMPTY_RESPONSE', 'empty-response'], ['STREAM_CLOSED', 'stream-closed'],
+  ['UPSTREAM_HTTP2_STREAM_ERROR', 'transport-reset'], ['UPSTREAM_STREAM_READ_ERROR', 'transport-reset'], ['UPSTREAM_STREAM_TRUNCATED', 'transport-reset'],
+]);
 
 function positiveMilliseconds(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER
@@ -130,8 +173,7 @@ function positiveMilliseconds(value) {
 
 /** Classify structured provider failures conservatively; ambiguous failures stop. */
 export function classifyFailure(failure, { nowMs = Date.now() } = {}) {
-  // nowMs is accepted for callers sharing the parseRetryAfter clock contract.
-  // LlmFailure already carries a parsed millisecond delay, not raw headers.
+  // Native failures retain only these normalized fields, not SDK headers/cause.
   void nowMs;
   if (!failure || typeof failure !== 'object') return { kind: 'unknown', reason: 'unrecognized-failure' };
   const code = typeof failure.code === 'string' ? normalizedCode(failure.code) : '';
@@ -142,39 +184,54 @@ export function classifyFailure(failure, { nowMs = Date.now() } = {}) {
     if (PERMANENT_CODES.has(embeddedCode)) return result('permanent', PERMANENT_CODES.get(embeddedCode));
   }
   const permanentReason = permanentTextReason(evidence.text);
+  if (permanentReason === 'model-unavailable' && /\bpi ai deferred response[^\n]*not supported\b/u.test(evidence.text)) return result('unknown', 'non-model-or-unsupported-failure');
   if (permanentReason) return result('permanent', permanentReason);
-  const encodedStatus = /^HTTP_(\d{3})$/u.exec(code);
-  const status = Number.isInteger(failure.status) ? failure.status : encodedStatus ? Number(encodedStatus[1]) : undefined;
-  if (status === 401 || status === 403) return result('permanent', status === 401 ? 'authentication' : 'permission');
-  if (status === 402) return result('permanent', 'quota');
-  if (status === 400 || status === 413 || status === 415 || status === 422) return result('permanent', 'invalid-request');
-  if (status === 404) return result('permanent', 'model-or-endpoint-not-found');
+  const statuses = evidence.statuses;
+  if (statuses.has(401) || statuses.has(403) || statuses.has(407)) return result('permanent', statuses.has(403) ? 'permission' : 'authentication');
+  if (statuses.has(402)) return result('permanent', 'quota');
+  if ([400, 413, 415, 422].some(status => statuses.has(status))) return result('permanent', 'invalid-request');
+  if (statuses.has(404) || statuses.has(410)) return result('permanent', 'model-or-endpoint-not-found');
+  if (statuses.has(501) || statuses.has(505)) return result('permanent', 'request-configuration');
   if (evidence.incomplete) return result('unknown', 'incomplete-failure-details');
-  if (code === 'ABORTED' || code === 'ABORT_ERR' || failure.name === 'AbortError') return result('unknown', 'aborted');
-  // Refused/unreachable connections and TLS/DNS configuration failures are
-  // not evidence of a temporary outage, even when wrapped in a SERVER error.
+  if (['ABORTED', 'ABORT_ERR', 'CANCELED', 'CANCELLED', 'CONTEXT_CANCELED'].some(value => evidence.codes.has(value)) || failure.name === 'AbortError' || /\bcontext cancel(?:l)?ed\b/u.test(evidence.text)) return result('unknown', 'aborted');
+  if ([...evidence.codes].some(value => NON_MODEL_ERROR_CODES.has(value))
+    || /\b(?:pi ai (?:stream[^\n]*ended pending|deferred response[^\n]*not supported)|(?:stream|response|request) (?:is |was |ended )?(?:pending|deferred)|deferred response|request error|schema (?:validation )?(?:error|failed)|tool (?:execution|call) (?:error|failed)|business (?:rule )?(?:error|failed))\b/u.test(evidence.text)) return result('unknown', 'non-model-or-unsupported-failure');
+  // An explicit incompatible HTTP response cannot be overridden by a broad
+  // SERVER code, a gateway prefix or words such as "please retry later".
+  if ([...statuses].some(status => status >= 400 && ![408, 429, 500, 502, 503, 504].includes(status))) return result('unknown', 'unrecognized-http-status');
   if (/\b(?:econnrefused|connection refused|enetunreach|ehostunreach|certificate|tls certificate|ssl certificate)\b/u.test(evidence.text)) return result('unknown', 'ambiguous-transport-failure');
-  const quotaHint = /\b(?:quota|billing|credits?|balance)\b|额度|配额|余额|计费/u.test(evidence.text);
-  if (quotaHint) return result('unknown', 'ambiguous-quota-failure');
-  const overloaded = providerOverloadEvidence(evidence);
-  if (code === 'PI_AI_ERROR') {
-    if (status >= 400 && status <= 499 && status !== 408 && status !== 429) return result('unknown', 'unrecognized-http-status');
-    return overloaded ? result('transient', 'server-overloaded') : result('unknown', 'unrecognized-failure');
+  const text = evidence.temporaryText;
+  const hasCode = (...values) => values.some(value => evidence.temporaryCodes.has(value));
+  const temporaryBillingService = hasCode('BILLING_SERVICE_ERROR') && /\bbilling service (?:is )?temporarily unavailable\b/u.test(text);
+  const temporaryAuthService = hasCode('API_KEY_AUTH_OVERLOADED') && /\bapi key authentication (?:is )?temporarily unavailable\b/u.test(text);
+  const rateWindow = hasCode('GATEWAY_RATE_LIMIT', 'RATE_LIMIT', 'RATE_LIMIT_ERROR', 'RATE_LIMIT_EXCEEDED') && /\b(?:per (?:second|minute)|rpm|tpm)\b/u.test(text);
+  const quotaHint = /\b(?:quota|billing|credits?|balance|budget)\b|额度|配额|余额|计费/u.test(evidence.text);
+  if (quotaHint && !temporaryBillingService && !rateWindow) return result('unknown', 'ambiguous-quota-failure');
+  if (temporaryBillingService || temporaryAuthService) return result('transient', 'server-error');
+  const retryHint = /\b(?:please )?(?:retry|try again)(?: later| shortly| after| soon)?\b|稍后重试|临时|暂时/u.test(text);
+  const concurrency = /\b(?:too many (?:concurrent|simultaneous|pending) requests|concurr(?:ent|ency) (?:request )?limit (?:exceeded|reached)|concurr(?:ent|ency) (?:request )?capacity (?:exceeded|reached))\b|并发(?:数|请求)?[^\n]{0,20}(?:限制|过多|超限)/u.test(text);
+  const gatewayConcurrency = hasCode('GATEWAY_CONCURRENCY_LIMIT', 'GATEWAY_QUEUE_FULL');
+  if (concurrency && (retryHint || gatewayConcurrency || hasCode('RATE_LIMIT', 'RATE_LIMIT_ERROR', 'RATE_LIMIT_EXCEEDED') || /\btoo many (?:concurrent|simultaneous) requests\b/u.test(text))) return result('transient', 'concurrency-limit');
+  const temporaryRate = /\b(?:rate limit (?:exceeded|error)|requests per (?:second|minute))\b|\b(?:temporary|temporarily)\b[^\n]{0,80}\b(?:rate limit|too many requests)\b|\b(?:rate limit|too many requests)\b[^\n]{0,80}\b(?:temporary|temporarily|try again|retry|per second|per minute)\b|请求频率过高|临时限流/u.test(text);
+  if (statuses.has(429) || hasCode('RATE_LIMIT', 'RATE_LIMIT_ERROR', 'RATE_LIMIT_EXCEEDED', 'GATEWAY_RATE_LIMIT')) {
+    return temporaryRate || retryAfterMs > 0 ? result('transient', 'rate-limit') : result('unknown', 'ambiguous-rate-limit');
   }
-  const temporaryRate = /\b(?:too many (?:concurrent|simultaneous) requests|concurr(?:ent|ency) (?:request )?(?:limit|capacity)|rate limit (?:exceeded|error))\b|\b(?:temporary|temporarily)\b[^\n]{0,80}\b(?:rate limit|too many requests)\b|\b(?:rate limit|too many requests)\b[^\n]{0,80}\b(?:temporary|temporarily|try again|retry|per second|per minute)\b|\brequests per (?:second|minute)\b|并发(?:数|请求)?[^\n]{0,20}(?:限制|过多|超限)|请求频率过高|临时限流/u.test(evidence.text);
-  if (status === 429 || /^RATE_LIMIT(?:_ERROR|_EXCEEDED)?$/u.test(code)) {
-    return temporaryRate || retryAfterMs > 0
-      ? result('transient', 'rate-limit') : result('unknown', 'ambiguous-rate-limit');
+  if (statuses.has(408) || statuses.has(504)) return result('transient', 'timeout');
+  if ((statuses.has(502) || statuses.has(503)) && !hasCode('UPSTREAM_ERROR')) return result('transient', 'server-error');
+  if (statuses.has(500)) {
+    return hasCode('SERVER', 'SERVER_ERROR', 'INTERNAL_SERVER_ERROR', 'API_ERROR')
+      ? result('transient', 'server-error') : result('unknown', 'unclassified-http-500');
   }
-  if (status === 408 || status === 504) return result('transient', 'timeout');
-  if (status >= 500 && status <= 599) return result('transient', 'server-error');
-  if (status >= 400 && status <= 499) return result('unknown', 'unrecognized-http-status');
-  if (overloaded) return result('transient', 'server-overloaded');
+  if (hasCode('OPENAI_SILENT_REFUSAL') && /\bempty completion without usage\b/u.test(text)) return result('transient', 'empty-response');
+  if (providerOverloadEvidence(evidence)) return result('transient', 'server-overloaded');
   if (temporaryRate) return result('transient', 'rate-limit');
+  for (const [specific, reason] of SPECIFIC_TRANSIENT_CODES) if (evidence.temporaryCodes.has(specific)) return result('transient', reason);
   if (TRANSIENT_CODES.has(code)) return result('transient', TRANSIENT_CODES.get(code));
-  if (/\b(?:(?:stream|socket|read|response|request|connection|connect) (?:idle )?(?:timeout|timed out)|etimedout|stream idle timeout)\b/u.test(evidence.text)) return result('transient', 'timeout');
-  if (/\b(?:econnreset|epipe|connection reset by peer|broken pipe|socket hang up|(?:stream|connection) (?:closed|ended) (?:unexpectedly|prematurely))\b/u.test(evidence.text)) return result('transient', 'transport-reset');
-  if (/\b(?:temporarily unavailable|server overloaded|service unavailable|bad gateway|gateway timeout)\b/u.test(evidence.text)) return result('transient', 'server-error');
+  if (/\b(?:(?:stream|socket|read|response|request|connection|connect) (?:idle )?(?:timeout|timed out)|etimedout|stream idle timeout)\b/u.test(text)) return result('transient', 'timeout');
+  if (/\b(?:econnreset|epipe|connection reset by peer|broken pipe|socket hang ?up|(?:stream|connection) (?:closed|ended) (?:unexpectedly|prematurely))\b/u.test(text)) return result('transient', 'transport-reset');
+  if (/\beai again\b|\btemporary failure in name resolution\b/u.test(text)) return result('transient', 'temporary-dns');
+  if (hasCode('UPSTREAM_ERROR')) return result('unknown', 'unclassified-upstream-failure');
+  if (/\b(?:temporarily unavailable|server overloaded|service unavailable|bad gateway|gateway timeout)\b/u.test(text)) return result('transient', 'server-error');
   return result('unknown', 'unrecognized-failure');
 }
 

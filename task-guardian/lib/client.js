@@ -88,7 +88,7 @@ window.__ModuleLoader__.load({
     }
     function GuardContent({ sessionId, api, t, compact, open }) {
       const state = useGuardian(sessionId, api); const { value, busy, change } = state;
-      const settings = value?.record.settings || { enabled: false, recoverAfterRestart: false, autoSelectFirst: false };
+      const settings = value?.record.settings || { enabled: true, recoverAfterRestart: true, autoSelectFirst: true };
       const unavailable = !value || !!value.fault;
       const phase = value?.record.run.phase || 'idle';
       const record = value?.record;

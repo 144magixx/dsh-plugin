@@ -12,11 +12,11 @@ function memoryDomain({ failAudit = false } = {}) {
   return { data, open: async () => ({ table: name => { if (!data.has(name)) data.set(name, new Map()); const m = data.get(name); return { get: key => m.get(key), entries: () => m.entries(), put: async (key, value) => { if (name === 'audit' && failAudit) throw Error('audit disk failed'); m.set(key, structuredClone(value)); } }; }, close: async () => {} }) };
 }
 
-test('settings default off, isolate sessions, survive reload and serialize revocation before stale scheduling', async () => {
+test('main guardian defaults on, sessions stay isolated and persisted revocation wins after reload', async () => {
   const domain = memoryDomain(); const store = await createGuardianStore(domain);
-  assert.deepEqual(store.get('a').settings, { enabled: false, recoverAfterRestart: false, autoSelectFirst: false });
+  assert.deepEqual(store.get('a').settings, { enabled: true, recoverAfterRestart: true, autoSelectFirst: true });
   await store.update('a', 'grant', r => ({ ...r, settings: { ...r.settings, enabled: true, recoverAfterRestart: true }, epoch: r.epoch + 1 }));
-  assert.equal(store.get('b').settings.enabled, false);
+  assert.equal(store.get('b').settings.enabled, true);
   const revoke = store.update('a', 'revoke', r => ({ ...r, settings: { ...r.settings, enabled: false }, epoch: r.epoch + 1 }));
   const stale = store.update('a', 'stale_retry', r => r.settings.enabled ? { ...r, retry: { attempt: 10, retryAt: 9000 } } : undefined);
   await Promise.all([revoke, stale]);
