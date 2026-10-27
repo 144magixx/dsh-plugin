@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-navigator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Find conversations by their latest topic with stable titles, Luna summaries, native hover details and recent visits.",
   "type": "module",
   "license": "MIT",

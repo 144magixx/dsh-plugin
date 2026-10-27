@@ -33,7 +33,7 @@ window.__ModuleLoader__.load({
       streamUnavailable: '当前连接暂不支持实时更新。',
       model: '摘要模型：{model}', keyboard: '↑↓ 选择 · Enter 打开 · 单击查看详情',
       back: '返回对话', preview: '会话详情', details: '查看详情', closePreview: '关闭预览',
-      errorDetails: '查看错误详情',
+      errorDetails: '查看错误详情', justNow: '刚刚',
     }
     const EN = {
       title: 'Session navigator', subtitle: 'Find your way back by what you discussed most recently.',
@@ -62,7 +62,7 @@ window.__ModuleLoader__.load({
       streamUnavailable: 'Live updates are not supported by this connection.',
       model: 'Summary model: {model}', keyboard: '↑↓ Select · Enter Open · Click for details',
       back: 'Back to conversation', preview: 'Session details', details: 'View details', closePreview: 'Close preview',
-      errorDetails: 'View error details',
+      errorDetails: 'View error details', justNow: 'Just now',
     }
 
     function createStore(initial) {
@@ -429,9 +429,36 @@ window.__ModuleLoader__.load({
 .dsh-nav-error{color:var(--dsw-alias-state-error-primary)}.dsh-nav-error details{font-size:11px;margin-top:6px}.dsh-nav-error summary{cursor:pointer}.dsh-nav-error p{white-space:pre-wrap;overflow-wrap:anywhere}
 .dsh-nav-empty{text-align:center;padding:54px 20px;color:var(--dsw-alias-label-secondary);display:flex;flex-direction:column;align-items:center;gap:10px}.dsh-nav-empty strong{font-weight:500;font-size:14px;color:var(--dsw-alias-label-primary)}.dsh-nav-empty p{margin:0;font-size:12px;line-height:1.7;max-width:300px}
 .dsh-nav-footer{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 2px 0;color:var(--dsw-alias-label-secondary);font-size:11px}
-.dsh-nav-popover{position:absolute;top:calc(100% - 2px);left:12px;right:12px;z-index:12;background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:15px;box-shadow:0 8px 24px color-mix(in srgb,var(--dsw-alias-label-primary) 12%,transparent);max-height:360px;overflow:auto}
-.dsh-nav-popover .dsh-nav-section{margin-bottom:12px}.dsh-nav-popover .dsh-nav-times{margin-top:12px}.dsh-nav-popover .dsh-nav-copy{font-size:12px;line-height:1.7}
-.dsh-nav-hover{min-width:0;max-width:390px;padding:6px 0}.dsh-nav-hover .dsh-nav-section{margin-bottom:12px}.dsh-nav-hover .dsh-nav-copy{font-size:12px;line-height:1.7}.dsh-nav-hover .dsh-nav-question{max-height:120px;font-size:12px}.dsh-nav-hover .dsh-nav-badges{margin-bottom:12px}.dsh-nav-hover .dsh-nav-times{margin-top:12px}
+/* Native HoverCard is a copyable div, not role=tooltip. Match the verified
+   CSS-module local names plus our own descendant, never every host card.
+   This styles the owning surface without adding DOM outside our slot. */
+.dsh-nav-popover,:where([class*="_card_"]):has(> [class*="_hoverContent"] .dsh-nav-hover){--dsh-nav-preview-ink:var(--dsw-alias-label-primary);--dsh-nav-preview-muted:color-mix(in srgb,var(--dsw-alias-label-primary) 70%,var(--dsw-alias-label-secondary));--dsw-hovercard-bg:var(--dsw-alias-bg-layer-1);box-sizing:border-box;width:min(320px,calc(100vw - 24px));max-height:min(320px,60vh);padding:14px 16px 12px;background:var(--dsw-hovercard-bg);color:var(--dsw-alias-label-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-border-l2) 75%,transparent);border-radius:14px;box-shadow:0 10px 28px color-mix(in srgb,var(--dsw-alias-label-primary) 10%,transparent);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+@supports ((backdrop-filter:blur(12px)) or (-webkit-backdrop-filter:blur(12px))){
+.dsh-nav-popover,:where([class*="_card_"]):has(> [class*="_hoverContent"] .dsh-nav-hover){--dsw-hovercard-bg:color-mix(in srgb,var(--dsw-alias-bg-layer-1) 90%,transparent);backdrop-filter:blur(12px) saturate(115%);-webkit-backdrop-filter:blur(12px) saturate(115%)}
+}
+:where([class*="_card_"]):has(> [class*="_hoverContent"] .dsh-nav-hover){right:12px;width:auto;max-width:min(320px,calc(100vw - 24px))}
+.dsh-nav-popover{position:absolute;top:calc(100% - 2px);left:12px;right:auto;z-index:12}
+:where([class*="_card_"]):has(> [class*="_hoverContent"] .dsh-nav-hover)>[class*="_hoverContent"]{display:flex;flex-direction:column;gap:0;min-width:0;color:var(--dsw-alias-label-primary)}
+:where([class*="_card_"]):has(> [class*="_hoverContent"] .dsh-nav-hover)>[class*="_hoverContent"]>[class*="_hoverTitle"]{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:600;line-height:1.45;margin:0 0 10px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+:where([class*="_card_"]):has(> [class*="_hoverContent"] .dsh-nav-hover)>[class*="_hoverContent"]>[class*="_hoverTime"]{display:none}
+:where([class*="_card_"]):has(> [class*="_hoverContent"] .dsh-nav-hover)>[class*="_hoverContent"]>[class*="_hoverStatus"]{color:var(--dsh-nav-preview-muted,currentColor);font-size:11px;line-height:1.4;margin-top:7px}
+.dsh-nav-hover{min-width:0;max-width:none;padding:0;color:inherit}.dsh-nav-hover[data-loading=true]{min-height:min(238px,40vh)}
+.dsh-nav-preview{font:inherit;font-size:13px;line-height:1.55;color:var(--dsh-nav-preview-ink,inherit);min-width:0}
+.dsh-nav-preview-title{font-size:13px;font-weight:600;line-height:1.45;margin:0 0 10px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.dsh-nav-preview-heading{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;min-width:0}
+.dsh-nav-preview-label{flex-shrink:0;font-size:10px;font-weight:500;line-height:18px;padding:0 5px;border-radius:4px;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 7%,transparent);color:var(--dsw-alias-brand-primary)}
+.dsh-nav-preview-topic{font-size:13px;font-weight:600;line-height:1.45;margin:0;min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.dsh-nav-preview-summary,.dsh-nav-preview-question{font-size:12px;line-height:1.65;white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;color:inherit;margin:0}
+.dsh-nav-preview-question-section{margin-top:11px;padding-top:10px;border-top:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 75%,transparent)}
+.dsh-nav-preview-question-section h3{font-size:10px;font-weight:500;line-height:1.4;margin:0 0 6px;color:var(--dsh-nav-preview-muted,currentColor)}
+.dsh-nav-preview-question{border-left:2px solid color-mix(in srgb,var(--dsw-alias-border-l2) 80%,transparent);padding:0 0 0 9px;background:transparent;border-radius:0}
+.dsh-nav-preview-topics{display:flex;align-items:center;gap:5px;min-width:0;margin-top:11px}
+.dsh-nav-preview-tag{font-size:10px;line-height:1.5;padding:3px 6px;background:color-mix(in srgb,var(--dsw-alias-label-primary) 4%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 50%,transparent);border-radius:5px;color:var(--dsh-nav-preview-muted,currentColor);max-width:calc(50% - 14px);white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.dsh-nav-preview-more{flex-shrink:0;font-size:10px;color:var(--dsh-nav-preview-muted,currentColor)}
+.dsh-nav-preview-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px;padding-top:9px;border-top:1px solid color-mix(in srgb,var(--dsw-alias-border-l1) 75%,transparent);font-size:10px;line-height:1.4;color:var(--dsh-nav-preview-muted,currentColor)}
+.dsh-nav-preview-status{display:flex;align-items:center;gap:5px;min-width:0}.dsh-nav-preview-status>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsh-nav-preview-footer time{flex-shrink:0;white-space:nowrap}
+@media (prefers-reduced-transparency:reduce){.dsh-nav-popover,:where([class*="_card_"]):has(> [class*="_hoverContent"] .dsh-nav-hover){--dsw-hovercard-bg:var(--dsw-alias-bg-layer-1);backdrop-filter:none;-webkit-backdrop-filter:none}}
+@media (forced-colors:active){.dsh-nav-popover,:where([class*="_card_"]):has(> [class*="_hoverContent"] .dsh-nav-hover){background:Canvas;color:CanvasText;border:1px solid CanvasText;backdrop-filter:none;-webkit-backdrop-filter:none}}
 .dsh-nav-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media(max-width:850px){.dsh-nav-page{padding-left:18px;padding-right:18px}.dsh-nav-columns{gap:14px;grid-template-columns:minmax(230px,1fr) minmax(240px,1fr)}.dsh-nav-detail{padding:16px}.dsh-nav-count{margin-left:0}}
 @media(max-width:650px){.dsh-nav-columns{grid-template-columns:1fr}.dsh-nav-detail{position:static}.dsh-nav-list{max-height:50vh;overflow:auto}.dsh-nav-popover{display:none}.dsh-nav-title{font-size:21px}.dsh-nav-header{gap:8px}.dsh-nav-control select{max-width:185px}.dsh-nav-filters{gap:10px}.dsh-nav-footer{align-items:flex-start;flex-wrap:wrap}}
@@ -462,6 +489,54 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'dsh-nav-feedback dsh-nav-error', role: 'alert' },
         h('span', null, title), message ? h('details', null, h('summary', null, t('errorDetails')), h('p', null, message)) : null,
         retry ? h('button', { type: 'button', className: 'dsh-nav-button', onClick: retry }, t('retry')) : null)
+    }
+    function compactPreview(item = {}) {
+      const topics = Array.isArray(item.pastTopics) ? item.pastTopics.filter(topic => typeof topic === 'string' && topic.trim()) : []
+      return {
+        title: item.title || '', topic: item.recentTopic || '',
+        topicLabel: summaryBehind(item) ? 'oldTopic' : 'recent',
+        summary: item.recentSummary || '', question: item.latestQuestion || '',
+        topics: topics.slice(0, 2), hiddenTopics: topics.slice(2),
+        timestamp: item.summaryUpdatedAt || item.updatedAt || 0,
+        timeLabel: item.summaryUpdatedAt ? 'summaryAt' : 'activityAt',
+        status: item.paused ? 'paused' : statusKey(item),
+      }
+    }
+    function relativeTimeParts(value, now = Date.now()) {
+      const number = typeof value === 'number' ? value : Date.parse(value)
+      if (!Number.isFinite(number) || number <= 0) return null
+      const seconds = Math.max(0, Math.floor((now - number) / 1000))
+      if (seconds < 60) return { unit: 'now', value: 0 }
+      if (seconds < 3600) return { unit: 'minute', value: -Math.floor(seconds / 60) }
+      if (seconds < 86400) return { unit: 'hour', value: -Math.floor(seconds / 3600) }
+      return { unit: 'day', value: -Math.floor(seconds / 86400) }
+    }
+    function relativeTimeText(value, language, t) {
+      const parts = relativeTimeParts(value)
+      if (!parts) return t('never')
+      if (parts.unit === 'now') return t('justNow')
+      try { return new Intl.RelativeTimeFormat(language || undefined, { numeric: 'always', style: 'short' }).format(parts.value, parts.unit) }
+      catch { return timeText(value, language, true) }
+    }
+    function CompactPreview({ item, t, language, showTitle = false }) {
+      const view = compactPreview(item)
+      const fullTime = timeText(view.timestamp, language)
+      return h('div', { className: 'dsh-nav-preview', 'data-nav-appearance': 'frosted-compact-v2' },
+        showTitle ? h('h2', { className: 'dsh-nav-preview-title' }, view.title || t('untitled')) : null,
+        view.topic ? h('div', { className: 'dsh-nav-preview-heading' },
+          h('span', { className: 'dsh-nav-preview-label' }, t(view.topicLabel)),
+          h('p', { className: 'dsh-nav-preview-topic' }, view.topic)) : null,
+        h('p', { className: 'dsh-nav-preview-summary', 'aria-label': t(view.topicLabel === 'oldTopic' ? 'oldSummary' : 'summary') }, view.summary || t('noSummary')),
+        view.question ? h('section', { className: 'dsh-nav-preview-question-section' },
+          h('h3', null, t('questionLabel')),
+          h('blockquote', { className: 'dsh-nav-preview-question' }, view.question)) : null,
+        view.topics.length ? h('div', { className: 'dsh-nav-preview-topics', 'aria-label': t('pastTopics') },
+          view.topics.map((topic, i) => h('span', { key: `${i}:${topic}`, className: 'dsh-nav-preview-tag' }, topic)),
+          view.hiddenTopics.length ? h('span', { className: 'dsh-nav-preview-more', title: view.hiddenTopics.join(' · ') }, `+${view.hiddenTopics.length}`) : null) : null,
+        h('div', { className: 'dsh-nav-preview-footer' },
+          h('span', { className: 'dsh-nav-preview-status', title: item.error || t(view.status) },
+            h('span', { className: 'dsh-nav-dot', 'data-status': item.status }), h('span', null, t(view.status))),
+          view.timestamp ? h('time', { title: `${t(view.timeLabel)}：${fullTime}`, dateTime: new Date(view.timestamp).toISOString() }, relativeTimeText(view.timestamp, language, t)) : null))
     }
     function DetailContent({ item, t, language, compact = false }) {
       const behind = summaryBehind(item)
@@ -514,7 +589,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dsh-nav-sr' }, t(statusKey(item))),
           h('time', null, timeText(sort === 'updated' ? item.updatedAt : item.lastVisitedAt || item.updatedAt, language, true)))),
         preview ? h('div', { id: previewId, className: 'dsh-nav-popover', role: 'tooltip', onKeyDown: event => { if (event.key === 'Escape') hide() } },
-          h(DetailContent, { item, t, language, compact: true })) : null)
+          h(CompactPreview, { item, t, language, showTitle: true })) : null)
     }
     function DetailPanel({ state, api, t, language }) {
       const item = state.byId[state.selectedId]
@@ -600,8 +675,8 @@ window.__ModuleLoader__.load({
       React.useEffect(() => api.retainItem(sessionId), [api, sessionId])
       const item = state.byId[sessionId]
       const detail = state.detailStates[sessionId]
-      return h('section', { className: 'dsh-nav-hover', 'aria-label': t('preview') }, h('style', null, CSS),
-        item ? h(DetailContent, { item, t, language, compact: true }) : h('p', { className: 'dsh-nav-muted', role: 'status' }, t(detail?.error ? 'detailFailure' : 'loadingDetail')),
+      return h('section', { className: 'dsh-nav-hover', 'data-loading': !item, 'aria-label': t('preview') }, h('style', null, CSS),
+        item ? h(CompactPreview, { item, t, language }) : h('p', { className: 'dsh-nav-muted', role: 'status' }, t(detail?.error ? 'detailFailure' : 'loadingDetail')),
         detail?.error ? h(Failure, { title: t('detailFailure'), message: detail.error, retry: () => api.retryItem(sessionId), t }) : null)
     }
     function apply(ctx) {
@@ -619,6 +694,6 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.slots.inject('sidebar.session.row.hover', () => ctx.slots.register({ name: 'sidebar.session.row.hover', id: NAME, order: 35, locale: NS, inject }, NativeHover)), `${NAME}: hover`)
     }
     return { name: NAME, inject: ['slots', 'locale', 'sessions', 'uiWorkspace', 'layout'], apply,
-      __test: { createStore, summaryBehind, secondLine, currentMainSession, mergeItems, requestJSON, readChanges, trackVisits, createController, ZH, EN } }
+      __test: { compactPreview, relativeTimeParts, createStore, summaryBehind, secondLine, currentMainSession, mergeItems, requestJSON, readChanges, trackVisits, createController, ZH, EN } }
   },
 })

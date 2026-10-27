@@ -17,6 +17,42 @@ const row = (id, patch = {}) => ({ sessionId: id, title: id, sourceSeq: 10, summ
 const page = (items, extra = {}) => ({ ok: true, items, total: items.length, workspaces: [], settings: { model: 'gpt-6-luna', autoSummarize: true }, ...extra })
 const controller = request => createController({ request, fetchImpl: async () => { throw new Error('unused stream') }, navigate: () => {}, debounceMs: 0, pageSize: 2 })
 
+test('compact hover limits visible tags without losing source details or stale context', () => {
+  const item = row('s', { title: 'Stable title', sourceSeq: 12, latestQuestionSeq: 12, recentSummary: 'Earlier confirmed discussion', pastTopics: ['One', 'Two', 'Three'], summaryUpdatedAt: 1234, updatedAt: 5678 })
+  const before = JSON.stringify(item)
+  const view = plugin.__test.compactPreview(item)
+  assert.equal(view.topicLabel, 'oldTopic')
+  assert.equal(view.summary, 'Earlier confirmed discussion')
+  assert.equal(view.question, 'Latest question')
+  assert.deepEqual(plain(view.topics), ['One', 'Two'])
+  assert.deepEqual(plain(view.hiddenTopics), ['Three'])
+  assert.equal(view.timestamp, 1234)
+  assert.equal(view.timeLabel, 'summaryAt')
+  assert.equal(JSON.stringify(item), before)
+})
+
+test('compact hover handles unavailable summaries and preserves pause status', () => {
+  const view = plugin.__test.compactPreview(row('s', { status: 'error', recentTopic: '', recentSummary: '', paused: true, updatedAt: 5678 }))
+  assert.equal(view.question, 'Latest question')
+  assert.equal(view.summary, '')
+  assert.equal(view.status, 'paused')
+  assert.equal(view.timestamp, 5678)
+  assert.equal(view.timeLabel, 'activityAt')
+  assert.deepEqual(plain(plugin.__test.compactPreview({}).topics), [])
+})
+
+test('compact relative timestamps handle just-now, future clocks and day boundaries', () => {
+  const now = 200000000
+  const parts = value => plain(plugin.__test.relativeTimeParts(value, now))
+  assert.equal(parts(0), null)
+  assert.equal(parts('not a date'), null)
+  assert.deepEqual(parts(now + 5000), { unit: 'now', value: 0 })
+  assert.deepEqual(parts(now - 59000), { unit: 'now', value: 0 })
+  assert.deepEqual(parts(now - 120000), { unit: 'minute', value: -2 })
+  assert.deepEqual(parts(now - 3600000), { unit: 'hour', value: -1 })
+  assert.deepEqual(parts(now - 86400000), { unit: 'day', value: -1 })
+})
+
 test('latest question replaces stale topics even during generation or error', () => {
   for (const status of ['ready', 'queued', 'generating', 'error', 'empty', 'stale']) {
     const item = row('s', { latestQuestionSeq: 12, sourceSeq: 12, summarySeq: 10, status })
