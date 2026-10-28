@@ -1,0 +1,25 @@
+Use case: ui-mockup
+Asset type: High fidelity desktop software right sidebar UI proposal, shown as a clean flat screenshot for user approval.
+Primary request: Redesign an existing small "外部能力" outlined button into a full-width card that visually matches the Session Summary card above and the Task Guardian card below. This is only a UI concept proposal; generate one clear recommended design, not a collage, not multiple alternatives.
+
+Canvas: 1536 x 1024 landscape. Show only the relevant right sidebar region, with three vertically stacked cards, all the same width and aligned exactly to the same left and right edges. Use generous yet restrained breathing room. Each card spans approximately x=110 to x=1426. The composition should be filled by these cards rather than a mostly empty canvas.
+
+Visual language: Match a restrained native DSH / macOS productivity app: white or very light neutral backgrounds, a very thin neutral gray border, large consistent rounded corners, barely visible soft shadow, black main labels, medium gray supporting text, understated thin-line monochrome icons. Chinese typography similar to PingFang SC, sharp and legible. No saturated colored card backgrounds. Blue appears only on the existing pin and existing enabled switch. Keep all three cards visually from the same product, with the same border color, corner family, title weight, icon size, and horizontal padding.
+
+Card 1 — existing compact session summary, at the top:
+Rounded full-width compact header card. Left: a simple gray outline folder icon and the bold title exactly "linkout 接口". Right: small gray down chevron, blue pin icon, gray ellipsis, gray close X. Approximately 115 px high at this canvas scale. Preserve its simple compact appearance.
+
+Card 2 — proposed External Capabilities entry, in the middle, with 24 px vertical spacing from its neighbors:
+A full-width rounded card, approximately 210 px high, white surface with the same subtle outline as the other cards. It must look like a native plugin card, not like a small standalone button and not like a primary blue CTA.
+Top row: a black/gray thin outline four-square capability icon, title exactly "外部能力" in the same weight and size as the Task Guardian title. At far right, a small neutral "33 项" count followed by a gray right-pointing chevron to signal that clicking opens a selection panel. Do not include a toggle switch because this opens a selector rather than enabling a service.
+Below the title, align text to the card body padding. A muted summary exactly "Skills 22 · CLI 7 · MCP 4". Below it, smaller muted helper text exactly "已去重，选择用于本次任务". Keep this short and clear; no additional buttons, no extra controls, no expanded selection list.
+
+Card 3 — existing Task Guardian card below:
+A full-width rounded white card with the same border/radius/padding family. Header left: black outline shield icon containing a small 5, title exactly "任务守护", a small right chevron next to the label. Header right: a blue toggle in the ON position, with the white knob on the right.
+Body text in three separate readable gray lines, exactly:
+"守护已开启 · 0 次"
+"无界重试可能持续产生费用。"
+"开启守护不会自动重放已经结束的失败轮次。"
+Approximately 325 px high at this canvas scale.
+
+Constraints: One flat front-facing screenshot-style design. Three separate cards with equal width, consistent spacing, consistent typography and icon scale. The external capabilities card is the only redesigned component, while the top and bottom represent the existing UI. Avoid any browser chrome, entire application layout, laptop/device render, arrows or annotations outside the UI, gradients, illustrations, marketing text, watermarks, before/after labels, or developer implementation details. All Chinese text must be accurate, clean, and not overlap. No functionality implementation, only a screenshot-like visual proposal.

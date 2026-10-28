@@ -51,8 +51,9 @@ try {
   const fixture = 'window.__capabilityBrowser';
   const open = async () => { if (!await evaluate('!!document.querySelector(".dsc-panel")')) await click('.dsc-trigger'); await waitFor(`${fixture}.api.getSnapshot().status==='ready' && !!document.querySelector('.dsc-panel')`); };
   const gapCheck = async label => {
-    const s = await box('[data-dsh-session-summary]'), dock = await box('.dsc-dock');
-    await check(label, !!s && !!dock && dock.top >= s.bottom + 6 && dock.bottom <= await evaluate('innerHeight') - 10 && dock.left >= 10 && dock.right <= await evaluate('innerWidth') - 10, JSON.stringify({ summary: s, dock }));
+    const s = await box('[data-dsh-session-summary]'), dock = await box('.dsc-dock'), card = await box('.dsc-trigger');
+    const reserve = await evaluate('parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dsh-summary-accessory-height"))');
+    await check(label, !!s && !!dock && !!card && dock.top >= s.bottom + 6 && dock.bottom <= await evaluate('innerHeight') - 10 && dock.left >= 10 && dock.right <= await evaluate('innerWidth') - 10 && Math.abs(card.left - s.left) <= 1 && Math.abs(card.width - s.width) <= 1 && Math.abs(reserve - Math.ceil(dock.height) - 12) <= 1, JSON.stringify({ summary: s, dock, card, reserve }));
   };
   const panelCheck = async label => {
     const p = await box('.dsc-panel'), footer = await box('.dsc-footer'), add = await box('.dsc-add');
@@ -78,13 +79,30 @@ try {
     await check(label, result.failures.length === 0 && !result.horizontalOverflow, JSON.stringify(result));
   };
   await resize(1440, 900);
-  await call('Page.navigate', { url: page });
-  await waitFor(`!!${fixture} && !!document.querySelector('[data-dsh-session-summary]') && !!document.querySelector('.dsc-trigger')`);
+  await call('Page.navigate', { url: `${page}?scan=hold` });
+  await waitFor(`!!${fixture} && !!document.querySelector('[data-dsh-session-summary]') && !!document.querySelector('.dsc-trigger') && ${fixture}.scanRequests.length===1`);
   await settle();
   await check('real installed React and native input engine mounted', `${fixture}.native && window.__shared.react.version==='18.3.1'`);
   await check('Chinese and English dictionaries have the same keys', `(()=>{const c=window.__registrations['dsh-capability-selector'].factory(id=>window.__shared[id]);return JSON.stringify(Object.keys(c.ZH).sort())===JSON.stringify(Object.keys(c.EN).sort())})()`);
-  await check('summary and capability share document and reserve 48px', `getComputedStyle(document.documentElement).getPropertyValue('--dsh-summary-accessory-height').trim()==='48px'`);
-  await gapCheck('button appears below the real summary');
+  await check('first read-only scan starts before opening and reports loading without a fake total', `${fixture}.api.getSnapshot().status==='loading' && !${fixture}.api.getSnapshot().open && document.querySelector('.dsc-trigger').getAttribute('aria-busy')==='true' && !document.querySelector('.dsc-card-count') && document.querySelector('.dsc-card-hint').textContent.length>0`);
+  await evaluate(`${fixture}.releaseScan()`); await waitFor(`${fixture}.api.getSnapshot().status==='ready'`); await settle();
+  await check('card displays discovered totals and all three capability counts before clicking', `${fixture}.scanRequests.length===1 && document.querySelector('.dsc-card-count').textContent.includes('52') && document.querySelector('.dsc-card-stats').textContent.includes('Skills 47') && document.querySelector('.dsc-card-stats').textContent.includes('CLI 3') && document.querySelector('.dsc-card-stats').textContent.includes('MCP 2') && document.querySelector('.dsc-card-hint').textContent.includes('去重')`);
+  await gapCheck('full-width native card aligns below summary and reserves its actual height');
+  await check('card is one accessible button with title, icon, total and opening chevron', `(()=>{const e=document.querySelector('.dsc-trigger');return e.tagName==='BUTTON' && e.getAttribute('aria-label')==='外部能力' && e.querySelector('.dsc-card-title')?.textContent==='外部能力' && e.querySelectorAll('.dsc-card-head svg').length===2 && !e.querySelector('button') && e.getBoundingClientRect().height>60})()`);
+  const restingStyle = await evaluate("(()=>{const s=getComputedStyle(document.querySelector('.dsc-trigger'));return {background:s.backgroundColor,border:s.borderTopColor}})()");
+  const cardHover = await box('.dsc-trigger'); await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: cardHover.left + 40, y: cardHover.top + 15 }); await settle();
+  const hoveredStyle = await evaluate("(()=>{const e=document.querySelector('.dsc-trigger'),s=getComputedStyle(e);return {background:s.backgroundColor,border:s.borderTopColor,cursor:s.cursor,hover:e.matches(':hover')}})()");
+  await check('native card has pointer feedback on hover', hoveredStyle.cursor === 'pointer' && hoveredStyle.hover && (hoveredStyle.background !== restingStyle.background || hoveredStyle.border !== restingStyle.border), JSON.stringify({ restingStyle, hoveredStyle }));
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+  await evaluate("document.querySelector('.dsc-trigger').focus()");
+  await check('keyboard focus has a visible native outline', `(()=>{const e=document.querySelector('.dsc-trigger'),s=getComputedStyle(e);return document.activeElement===e && s.outlineStyle!=='none' && parseFloat(s.outlineWidth)>=1})()`);
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }); await settle();
+  await check('Enter opens the selector without another discovery request', `!!document.querySelector('.dsc-panel') && ${fixture}.scanRequests.length===1`);
+  await evaluate(`${fixture}.api.close();document.querySelector('.dsc-trigger').focus()`); await settle();
+  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 }); await call('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 }); await settle();
+  await check('Space opens the selector as a native button', `!!document.querySelector('.dsc-panel')`);
+  await evaluate(`${fixture}.api.close()`); await settle();
+  await shot('capability-card-wide.png');
   const initial = await box('[data-dsh-session-summary]');
   await evaluate(`${fixture}.summaryLong()`); await settle();
   const grown = await box('[data-dsh-session-summary]');
@@ -116,6 +134,7 @@ try {
   await evaluate(`{const e=document.querySelector('.dsc-source-select');e.value='';e.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('.dsc-list').scrollTop=0;}`); await settle();
   await click('.dsc-row:first-child input'); await click('.dsc-row:nth-child(3) input');
   await check('selection displays two chips and selected count', 'document.querySelectorAll(".dsc-chip").length===2 && document.querySelector(".dsc-selection-head").textContent.includes("2")');
+  await check('selected information stays inside the full-width card hint', `document.querySelector('.dsc-trigger .dsc-card-hint .dsc-selected-count')?.textContent.includes('已选 2 项')`);
   await click('.dsc-row:first-child .dsc-entry');
   await waitFor(`${fixture}.api.getSnapshot().detailStatus==='ready'`);
   await check('details renders full document and merged sources', 'document.querySelectorAll(".dsc-source-item").length===3 && document.querySelector(".dsc-content").textContent.includes("使用说明")');
@@ -162,6 +181,7 @@ try {
   for (const [width, height] of [[1440,480],[1000,900],[760,900],[760,480],[320,480],[320,190],[760,190]]) {
     await resize(width, height); await evaluate(`${fixture}.resetSummary()`); await settle();
     await gapCheck(`${width}x${height} summary leaves accessory space`);
+    if (height <= 280) await check(`${width}x${height} hides auxiliary card rows while keeping title and total`, `getComputedStyle(document.querySelector('.dsc-card-stats')).display==='none' && getComputedStyle(document.querySelector('.dsc-card-hint')).display==='none' && document.querySelector('.dsc-card-title').getClientRects().length>0 && document.querySelector('.dsc-card-count').getClientRects().length>0`);
     await open(); await panelCheck(`${width}x${height} panel footer reachable`);
     await textBoundsCheck(`${width}x${height} long names, descriptions and sources stay in separate areas`);
     const listBox = await box('.dsc-list');
@@ -198,6 +218,23 @@ try {
   await check('browser and React report no uncaught errors', `${fixture}.errors.length===0`, JSON.stringify(errors));
   await evaluate(`${fixture}.uninstall();${fixture}.unmount()`); await settle();
   await check('full fixture unmount removes both overlays', '!document.querySelector(".dsc-trigger")&&!document.querySelector("[data-dsh-session-summary]")');
+  await call('Page.navigate', { url: `${page}?scan=fail` });
+  await waitFor(`!!${fixture} && ${fixture}.api.getSnapshot().status==='error' && !!document.querySelector('.dsc-trigger')`); await settle();
+  await check('failed first scan leaves an actionable error hint without a false total', `!${fixture}.api.getSnapshot().open && document.querySelector('.dsc-card-hint').getAttribute('role')==='status' && document.querySelector('.dsc-card-hint').textContent.length>0 && !document.querySelector('.dsc-card-count') && ${fixture}.scanRequests.length===1`);
+  await evaluate(`${fixture}.api.set({notice:'fixture render'});window.dispatchEvent(new Event('resize'));document.querySelector('.dsc-trigger').focus()`);
+  await evaluate('new Promise(resolve=>setTimeout(resolve,350))');
+  await check('first scan error does not create a render or resize retry loop', `${fixture}.scanRequests.length===1 && ${fixture}.api.getSnapshot().status==='error'`);
+  await evaluate(`${fixture}.setScanMode('ready')`); await click('.dsc-trigger'); await waitFor(`${fixture}.api.getSnapshot().status==='ready'`);
+  await check('explicit card activation may retry a failed discovery once', `${fixture}.scanRequests.length===2 && !!document.querySelector('.dsc-panel') && document.querySelector('.dsc-card-count').textContent.includes('52')`);
+  await evaluate(`${fixture}.uninstall();${fixture}.unmount()`); await settle();
+  await call('Page.navigate', { url: `${page}?lang=en` });
+  await waitFor(`!!${fixture} && ${fixture}.api.getSnapshot().status==='ready' && !!document.querySelector('.dsc-card-count')`); await settle();
+  await check('English card uses localized title, total and helper copy', `document.querySelector('.dsc-trigger').getAttribute('aria-label')==='External capabilities' && document.querySelector('.dsc-card-title').textContent==='External capabilities' && document.querySelector('.dsc-card-count').textContent.includes('52') && !/[\\u4e00-\\u9fff]/.test(document.querySelector('.dsc-card-hint').textContent)`);
+  await gapCheck('English card stays full width with measured reserve'); await shot('capability-card-english.png');
+  await click('.dsc-trigger');
+  await check('English card opens the localized selector', `document.querySelector('.dsc-heading h2').textContent==='External capabilities' && ${fixture}.scanRequests.length===1`);
+  await check('loading, failure and English fixtures report no browser errors', `${fixture}.errors.length===0 && ${JSON.stringify(errors.length)}===0`, JSON.stringify(errors));
+  await evaluate(`${fixture}.uninstall();${fixture}.unmount()`); await settle();
   const report = { passed, failed: failures.length, failures, browserErrors: errors, nativeDraftEngine: true, fixture: page, screenshotDirectory: outputDir };
   fs.writeFileSync(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify(report, null, 2));

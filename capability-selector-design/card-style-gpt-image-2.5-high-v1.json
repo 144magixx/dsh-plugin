@@ -1,0 +1,12 @@
+{
+  "model": "gpt-image-2.5-sunburst",
+  "quality": "high",
+  "size": "1536x1024",
+  "n": 1,
+  "output_format": "png",
+  "promptFile": "/Users/minyuwei.6666/dsh-plugin/capability-selector-design/card-style-gpt-image-2.5-prompt.txt",
+  "imagePath": "/Users/minyuwei.6666/dsh-plugin/capability-selector-design/card-style-gpt-image-2.5-high-v1.png",
+  "bytes": 1233521,
+  "requestId": "8e4d0007-f0f5-41c6-b6bf-d09544b877a9",
+  "createdAt": "2026-10-27T09:11:53.810Z"
+}

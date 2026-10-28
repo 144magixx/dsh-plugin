@@ -271,6 +271,17 @@ test('large accessory columns retain the existing viewport safety clamp for dock
   }
 });
 
+test('accessory cards consume remaining viewport space without double-subtracting the summary height cap', () => {
+  const viewport = { width: 760, height: 480 };
+  const anchor = summaryLayout({ width: 760, right: 760, bottom: 60 }, viewport, false);
+  const compact = cardPlacement(anchor, null, viewport, 44, 200);
+  assert.ok(compact.maxHeight >= 44, 'a collapsed summary header stays entirely visible');
+  assert.equal(compact.top, anchor.top, 'the summary stays beneath its conversation header');
+  const expanded = cardPlacement(anchor, null, viewport, 1000, 200);
+  assert.ok(expanded.maxHeight >= 160, 'available room remains usable by the summary list');
+  assert.ok(expanded.top + expanded.maxHeight + 200 <= viewport.height - 12);
+});
+
 test('default layout reserves a side column or a narrow-window summary row', () => {
   const viewport = { width: 1440, height: 900 };
   const side = summaryLayout({ width: 1200, right: 1440, bottom: 76 }, viewport, false);

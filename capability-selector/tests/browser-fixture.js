@@ -13,7 +13,9 @@
   const capability = window.__registrations['dsh-capability-selector'].factory(require)
   const native = window.__registrations['@deepseek-ai/dsh-client-ui-conversation'].factory(require)
   const translate = dictionary => (key, values = {}) => String(dictionary[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(values[name] ?? ''))
-  const st = translate(summary.ZH), ct = translate(capability.ZH)
+  const params = new URLSearchParams(location.search)
+  const language = params.get('lang') === 'en' ? 'en' : 'zh'
+  const st = translate(language === 'en' ? summary.EN : summary.ZH), ct = translate(language === 'en' ? capability.EN : capability.ZH)
   const stable = value => ({ getSnapshot: () => value, subscribe: () => () => {} })
   const copies = [], appendCalls = [], cleanupCalls = []
   const scopeEffects = []
@@ -60,7 +62,7 @@
     get: name => name === 'clipboard' ? { writeText: async text => copies.push(text) } : undefined,
     locale: {
       register(namespace, dictionary) { dictionaries.set(namespace, dictionary); return () => dictionaries.delete(namespace) },
-      bind(namespace) { return (key, values) => translate(dictionaries.get(namespace).zh)(key, values) },
+      bind(namespace) { return (key, values) => translate(dictionaries.get(namespace)[language])(key, values) },
     },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') effects.push(dispose); return dispose },
     slots: {
@@ -85,9 +87,20 @@
     sources: [{ agent: i % 2 ? 'Codex' : 'DSH', path: `/fixture/skills/example-${i}/SKILL.md` }, ...(i < 2 ? [{ agent: 'Additional source with an extremely long display name', path: `/fixture/shared/example-${i}/SKILL.md` }] : [])],
     selectionText: `- Skill: example-${i}`,
   }))]
+  const scanRequests = [], pendingScans = []
+  let scanMode = params.get('scan') || 'ready'
   const transport = async (url, init = {}) => {
     const payload = JSON.parse(init.body ?? '{}')
-    if (String(url).endsWith('/scan')) return { ok: true, status: 200, json: async () => ({ ok: true, items, complete: true, warnings: [], scannedAt: Date.now() }) }
+    if (String(url).endsWith('/scan')) {
+      scanRequests.push({ ...payload })
+      if (scanMode === 'hold') await new Promise((resolve, reject) => {
+        pendingScans.push(resolve)
+        init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+      })
+      if (init.signal?.aborted) throw new DOMException('aborted', 'AbortError')
+      if (scanMode === 'fail') return { ok: false, status: 503, json: async () => ({ ok: false, error: { code: 'FIXTURE_OFFLINE', message: 'Fixture discovery temporarily unavailable' } }) }
+      return { ok: true, status: 200, json: async () => ({ ok: true, items, complete: true, warnings: [], scannedAt: Date.now() }) }
+    }
     if (String(url).endsWith('/detail')) return { ok: true, status: 200, json: async () => ({ ok: true, id: payload.id, content: '# 使用说明\n\n按当前任务读取能力说明与核对依赖。\n'.repeat(70) }) }
     throw new Error('Unexpected fixture request ' + url)
   }
@@ -142,6 +155,9 @@
   root.render(h(Page))
   window.__capabilityBrowser = {
     errors, native: true, api, summaryApi, appendCalls, copies, current, inputHub,
+    scanRequests, language,
+    releaseScan() { scanMode = 'ready'; for (const resolve of pendingScans.splice(0)) resolve() },
+    setScanMode(mode) { scanMode = mode },
     seedDraft(text = '保留这段未发送的草稿', attachments = ['attachment-existing']) { const shell = inputHub.shell(current.getSnapshot().key); shell.actions.setDraft(text); shell.actions.pruneAttachments([]); shell.actions.addAttachments(attachments) },
     seedReferenceDraft() { const prefix = '保留这段未发送的草稿 ', token = '@existing.txt'; const shell = inputHub.shell(current.getSnapshot().key); shell.actions.setDraft({ text: prefix + token, references: [{ source: 'fixture-file', ref: 'file:///fixture/existing.txt', offset: prefix.length, length: token.length, label: 'existing.txt', appearance: 'file', clipboardText: token }] }); shell.actions.pruneAttachments([]); shell.actions.addAttachments(['attachment-existing']) },
     snapshot(id = current.getSnapshot().key) { return JSON.parse(JSON.stringify(inputHub.shell(id).state.getSnapshot())) },

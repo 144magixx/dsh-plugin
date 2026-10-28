@@ -627,7 +627,7 @@ window.__ModuleLoader__.load({
       const width = Math.max(1, Math.min(anchor.width, viewport.width - margin * 2))
       const docked = !position && anchor.layout && anchor.layout !== 'floating'
       const reserve = Number.isFinite(reservedHeight) ? clamp(reservedHeight, 0, Math.max(0, viewport.height - margin * 2 - 40)) : 0
-      const maxHeight = Math.max(1, Math.min(anchor.maxHeight, viewport.height - margin * 2, docked ? viewport.height - anchor.top - margin : Infinity) - reserve)
+      const maxHeight = Math.max(1, Math.min(anchor.maxHeight, viewport.height - margin * 2 - reserve, docked ? viewport.height - anchor.top - margin - reserve : Infinity))
       const height = Math.min(measuredHeight ?? maxHeight, maxHeight)
       const left = position?.left ?? anchor.right - width
       const top = position?.top ?? anchor.top

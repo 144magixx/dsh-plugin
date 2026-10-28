@@ -174,7 +174,7 @@ test('native renderSlot receives the selected session below controls and fixture
   const tree = c.CapabilityOverlay({ ...args, renderSlot: (name, props) => { calls.push({ name, props }); return 'companion'; } });
   const dock = tree.props.children[0], controls = dock.props.children[0], accessories = dock.props.children[1];
   assert.equal(controls.props.className, 'dsc-controls');
-  assert.equal(controls.props.children[0].props.className, 'dsc-trigger');
+  assert.equal(controls.props.children[0].type, c.CapabilityCard);
   assert.equal(accessories.props.className, 'dsc-accessories');
   assert.deepEqual(plain(calls), [{ name: 'capability-selector.accessories', props: { sessionId: 's' } }]);
   assert.equal(accessories.props.children[0], 'companion');
@@ -235,4 +235,51 @@ test('own dock ResizeObserver measures companions, publishes only changed reserv
   assert.equal(frames.size, 0); assert.ok(resizeObservers[0].nodes.size === 0);
   assert.ok(mutationObservers.every(observer => observer.nodes.size === 0));
   assert.ok([...windowListeners.values()].every(list => list.size === 0));
+});
+
+function cardHarness() {
+  const c = loadClient({ createElement: (type, props, ...children) => ({ type, props: { ...props, children } }) });
+  const text = node => node == null || node === false ? '' : Array.isArray(node) ? node.map(text).join('') : typeof node === 'object' ? text(node.props?.children) : String(node);
+  const find = (node, className) => {
+    if (!node || typeof node !== 'object') return undefined;
+    if (Array.isArray(node)) return node.map(child => find(child, className)).find(Boolean);
+    if (node.props?.className?.split(' ').includes(className)) return node;
+    return find(node.props?.children, className);
+  };
+  const t = dictionary => (key, values = {}) => String(dictionary[key] ?? key).replace(/\{(\w+)\}/g, (_, field) => String(values[field] ?? ''));
+  const base = { status: 'idle', scannedAt: null, items: [], selectedIds: [], open: false };
+  return { c, text, find, t, base };
+}
+
+test('native capability card counts every type and keeps selected copy in its own hint', () => {
+  const { c, text, find, t, base } = cardHarness(); const actions = [];
+  const api = { open: () => actions.push('open'), close: () => actions.push('close') };
+  const state = { ...base, items, selectedIds: ['a', 'b'], status: 'ready', scannedAt: 1 };
+  const tree = c.CapabilityCard({ api, state, t: t(c.ZH), triggerRef: {} });
+  assert.equal(tree.type, 'button'); assert.equal(tree.props.type, 'button');
+  assert.equal(tree.props['aria-expanded'], false); assert.equal(tree.props['aria-busy'], false);
+  assert.equal(tree.props['aria-label'], c.ZH.title);
+  assert.equal(text(find(tree, 'dsc-card-count')), t(c.ZH)('cardTotal', { count: 4 }));
+  assert.equal(text(find(tree, 'dsc-card-stats')), t(c.ZH)('cardStats', { skills: 1, cli: 2, mcp: 1 }));
+  assert.match(text(find(tree, 'dsc-card-hint')), /已选 2 项/);
+  assert.ok(find(find(tree, 'dsc-card-hint'), 'dsc-selected-count'));
+  tree.props.onClick(); assert.deepEqual(actions, ['open']);
+  c.CapabilityCard({ api, state: { ...state, open: true }, t: t(c.ZH), triggerRef: {} }).props.onClick();
+  assert.deepEqual(actions, ['open', 'close']);
+});
+
+test('card loading and failure do not fabricate totals and all helper states localize', () => {
+  const { c, text, find, t, base } = cardHarness();
+  for (const dictionary of [c.ZH, c.EN]) {
+    for (const [status, key] of [['idle', 'cardIdle'], ['loading', 'cardDiscovering'], ['error', 'cardFailed']]) {
+      const tree = c.CapabilityCard({ api: {}, state: { ...base, status }, t: t(dictionary) });
+      assert.equal(find(tree, 'dsc-card-count'), undefined);
+      assert.equal(tree.props['aria-busy'], status === 'loading');
+      assert.equal(text(find(tree, 'dsc-card-hint')), dictionary[key]);
+      assert.equal(find(tree, 'dsc-card-hint').props.role, status === 'error' ? 'status' : undefined);
+    }
+    const empty = c.CapabilityCard({ api: {}, state: { ...base, status: 'ready', scannedAt: 1 }, t: t(dictionary) });
+    assert.equal(text(find(empty, 'dsc-card-count')), t(dictionary)('cardTotal', { count: 0 }));
+    assert.equal(text(find(empty, 'dsc-card-stats')), t(dictionary)('cardStats', { skills: 0, cli: 0, mcp: 0 }));
+  }
 });
