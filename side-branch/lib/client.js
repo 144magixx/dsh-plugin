@@ -16,6 +16,15 @@ window.__ModuleLoader__.load({
     const PREFIX = 'dsh-resource://side-branch/session/'
     const STORAGE_KEY = 'dsh.side-branch.recovery.v1'
     const EMPTY = Object.freeze([])
+    // crypto.randomUUID exists only in secure contexts (HTTPS/localhost); `dsh web`
+    // on a LAN address is plain HTTP, so mint v4 UUIDs from getRandomValues instead.
+    const randomUUID = () => {
+      const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+      bytes[6] = (bytes[6] & 0x0f) | 0x40
+      bytes[8] = (bytes[8] & 0x3f) | 0x80
+      const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+    }
     const ZH = {
       title: '岔路 · 侧栏分支', guide: '选择历史轮次续问，或编辑原提问；分支持久保留在会话列表中',
       continue: '侧栏分支', edit: '编辑本轮提问', continueMode: '从本轮之后续问', editMode: '编辑本轮提问',
@@ -439,7 +448,7 @@ window.__ModuleLoader__.load({
       if (resource.value === undefined) return h('div', { className: 'sb-scroll' }, resource.status === 'loading' && h('div', null, t('loading')), h(ErrorView, { error: resource.failure ?? (resource.status === 'none' ? t('unsupported') : null), t }), h(Button, { onClick: () => {
         const branch = parseBranchAddress(tab.contentId)
         runtime.closeResolved(branch.sessionId)
-        tab.actions.openResource(retryBranchAddress(tab.contentId, globalThis.crypto.randomUUID()), { replaceTab: true })
+        tab.actions.openResource(retryBranchAddress(tab.contentId, randomUUID()), { replaceTab: true })
       } }, t('retry')))
       if (typeof SessionProvider !== 'function') return h(ErrorView, { error: t('unsupported'), t })
       return h(SessionProvider, { session: resource.value.reference }, renderSlot(SLOT, { resource: resource.value, tab }))
@@ -492,7 +501,7 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState(null)
       const pending = React.useRef(false)
       const frozen = React.useRef(null)
-      const [editId] = React.useState(() => globalThis.crypto.randomUUID())
+      const [editId] = React.useState(() => randomUUID())
       const attachments = (node.data.content ?? EMPTY).some((part) => part.type !== 'text')
       const save = async () => {
         if (pending.current || !text.trim()) return
@@ -591,7 +600,7 @@ window.__ModuleLoader__.load({
       let storage
       try { storage = globalThis.localStorage } catch { storage = undefined }
       const sidebarSessionId = () => ctx.sidebarRight.mounted.getSnapshot()
-      const runtime = createRuntime({ api, storage, makeId: () => globalThis.crypto.randomUUID(), onRecover: (_branch, ownerSessionId) => {
+      const runtime = createRuntime({ api, storage, makeId: () => randomUUID(), onRecover: (_branch, ownerSessionId) => {
         // Never navigate a different Session if the user switched during the request.
         // Recovery records remain available from the guide after refresh as well.
         if (sidebarSessionId() !== ownerSessionId) return
@@ -617,6 +626,6 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.sidebarRight.registerCloseHandler(KIND, (ownerSessionId, tab) => { runtime.closeFromTab(tab.contentId, ownerSessionId) }), '[side-branch] recoverable close')
     }
     return { name: TYPE, inject: ['slots', 'sidebarRight', 'sidebarRightTabs', 'resources', 'sessions', 'conversation', 'uiWorkspace', 'locale', 'connection'], apply,
-      branchAddress, parseBranchAddress, retryBranchAddress, nativeCapabilities, requiresNewRequest, createApi, nativeTurnState, nativeUserTurnState, registerUserActions, UserActions, eligible, preview, createRuntime, branchResourceProvider, ZH, EN, CSS, STORAGE_KEY }
+      branchAddress, parseBranchAddress, retryBranchAddress, nativeCapabilities, requiresNewRequest, createApi, nativeTurnState, nativeUserTurnState, registerUserActions, UserActions, eligible, preview, createRuntime, branchResourceProvider, randomUUID, ZH, EN, CSS, STORAGE_KEY }
   }
 })
