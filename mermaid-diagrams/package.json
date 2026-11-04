@@ -1,0 +1,18 @@
+{
+  "name": "dsh-mermaid-diagrams",
+  "version": "0.2.0",
+  "description": "Render Mermaid diagrams directly inside DSH conversations, with source view, zoom and SVG / PNG download.",
+  "type": "module",
+  "license": "MIT",
+  "main": "index.js",
+  "icon": "./icon.svg",
+  "exports": { ".": "./index.js", "./client": "./lib/client.js", "./locale/*.json": "./locale/*.json", "./icon": "./icon.svg", "./package.json": "./package.json" },
+  "files": ["index.js", "lib", "cordis.patch.yml", "locale", "icon.svg", "README.md", "LICENSE"],
+  "engines": { "node": ">=22", "dsh": ">=0.2.1-rc.5 <0.3.0" },
+  "scripts": { "build": "node scripts/build.mjs", "test": "node --test tests/*.test.mjs", "check": "node --check index.js && node --check lib/client.js" },
+  "devDependencies": { "mermaid": "12.3.0", "dompurify": "3.3.1", "esbuild": "0.25.12" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web", "immediately": true, "inject": ["@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-theme", "@deepseek-ai/dsh-client-ui-chat"] }
+  }
+}

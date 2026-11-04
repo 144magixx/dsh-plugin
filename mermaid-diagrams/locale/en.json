@@ -1,0 +1,6 @@
+{
+  "meta": { "title": "Conversation Diagrams · Mermaid", "description": "Render Mermaid flowcharts, sequence diagrams and more in conversations, with source view, zoom and SVG / PNG download." },
+  "ui": {
+    "diagram": "Diagram", "viewSource": "View source", "viewDiagram": "View diagram", "copy": "Copy source", "copied": "Copied", "expand": "Expand", "download": "Download", "downloadSvg": "Download SVG", "downloadPng": "Download PNG", "close": "Close", "zoomIn": "Zoom in", "zoomOut": "Zoom out", "fit": "Fit to window (0)", "rendering": "Rendering diagram", "renderError": "Could not render diagram", "parseError": "Syntax error on line {line}", "retry": "Retry", "copyError": "Copy failed. Select the text in the source view instead.", "sourceTooLarge": "This diagram exceeds 30,000 characters. Split it into smaller diagrams.", "customConfig": "Mermaid configuration directives and YAML front matter are not supported. Remove them and retry.", "externalStyle": "Diagrams cannot reference external images or style resources.", "invalidSvg": "The renderer returned invalid SVG.", "elkUnsupported": "ELK layout is not supported. Use flowchart instead.", "pngError": "Export failed. Use SVG instead."
+  }
+}

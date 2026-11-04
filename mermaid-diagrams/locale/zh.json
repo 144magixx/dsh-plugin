@@ -1,0 +1,6 @@
+{
+  "meta": { "title": "会话图表 · Mermaid", "description": "在会话中直接显示 Mermaid 流程图、时序图、类图等，支持源码切换、放大缩放和 SVG / PNG 下载。" },
+  "ui": {
+    "diagram": "图表", "viewSource": "查看源码", "viewDiagram": "查看图表", "copy": "复制源码", "copied": "已复制", "expand": "放大查看", "download": "下载", "downloadSvg": "下载 SVG", "downloadPng": "下载 PNG", "close": "关闭", "zoomIn": "放大", "zoomOut": "缩小", "fit": "适应窗口（快捷键 0）", "rendering": "正在绘制图表", "renderError": "图表未能渲染", "parseError": "第 {line} 行有语法错误", "retry": "重试", "copyError": "复制失败，可在源码中选择文字复制。", "sourceTooLarge": "图表超过 30,000 字符，请拆分成较小的图表。", "customConfig": "暂不支持 Mermaid 配置指令或 YAML 前置信息，请移除后重试。", "externalStyle": "图表不能引用外部图片或样式资源。", "invalidSvg": "图表引擎返回了无效的 SVG。", "elkUnsupported": "暂不支持 ELK 布局，请改用 flowchart。", "pngError": "导出失败，请改用 SVG。"
+  }
+}
