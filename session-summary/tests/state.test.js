@@ -305,3 +305,58 @@ test('default layout reserves a side column or a narrow-window summary row', () 
   api.setPosition(null);
   assert.equal(api.prefs.getSnapshot().floating, false, 'reset docks the card again');
 });
+
+function fakeDocument(panels = []) {
+  return {
+    documentElement: {},
+    querySelectorAll: selector => { assert.equal(selector, '[data-sidebar-right-panel][data-sidebar-right-open]'); return panels; },
+  };
+}
+const panel = hidden => ({ closest: selector => (selector === '[hidden]' && hidden ? {} : null) });
+
+test('right sidebar state prefers the documented isExpanded() read and falls back to the visible panel marker', () => {
+  const { rightSidebarExpanded } = client;
+  assert.equal(rightSidebarExpanded({ isExpanded: () => true }, fakeDocument()), true);
+  assert.equal(rightSidebarExpanded({ isExpanded: () => false }, fakeDocument([panel(false)])), false, 'the service wins over stale markers');
+  assert.equal(rightSidebarExpanded({ isExpanded: () => 'yes' }, fakeDocument()), false, 'only a real true counts');
+  assert.equal(rightSidebarExpanded({ isExpanded() { throw new Error('no surface'); } }, fakeDocument([panel(false)])), true);
+  assert.equal(rightSidebarExpanded(undefined, fakeDocument([panel(true)])), false, 'a background Session panel does not count');
+  assert.equal(rightSidebarExpanded(undefined, fakeDocument([panel(true), panel(false)])), true);
+  assert.equal(rightSidebarExpanded(undefined, fakeDocument()), false);
+  assert.equal(rightSidebarExpanded(undefined, undefined), false);
+});
+
+test('sidebar watch follows on-screen Session changes and releases every trigger', () => {
+  const { watchRightSidebar } = client;
+  const listeners = new Set();
+  const mounted = { subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); } };
+  let calls = 0;
+  const stop = watchRightSidebar({ mounted }, () => { calls++; }, undefined);
+  for (const listener of listeners) listener('next');
+  assert.equal(calls, 1);
+  stop(); stop();
+  assert.equal(listeners.size, 0);
+  const broken = watchRightSidebar({ mounted: { subscribe() { throw new Error('gone'); } } }, () => {}, undefined);
+  broken();
+});
+
+test('an expanded right sidebar hides the card until the toggle reveals it; closing the sidebar resets the reveal', () => {
+  let expanded = false;
+  const { api } = harness({ sidebarRight: { isExpanded: () => expanded } });
+  assert.equal(api.sidebarOpen(), false);
+  expanded = true;
+  assert.equal(api.sidebarOpen(), true, 'the read is live, never cached');
+  assert.equal(api.ui.getSnapshot().sidebarReveal, false);
+  api.setSidebarReveal(true);
+  assert.equal(api.ui.getSnapshot().sidebarReveal, true);
+  assert.equal(api.prefs.getSnapshot().pinned, true, 'revealing keeps the pin');
+  api.setSidebarReveal('true');
+  assert.equal(api.ui.getSnapshot().sidebarReveal, false, 'only a real true reveals');
+  api.setSidebarReveal(true);
+  api.close();
+  assert.deepEqual([api.prefs.getSnapshot().pinned, api.ui.getSnapshot().openSession, api.ui.getSnapshot().sidebarReveal], [false, null, false], 'closing also ends a reveal');
+  assert.equal(harness({}).api.sidebarOpen(), false, 'without the service and the DOM the card stays as before');
+  const stop = harness({}).api.subscribeSidebar(() => {});
+  assert.equal(typeof stop, 'function');
+  stop();
+});

@@ -25,8 +25,15 @@
   const sessionId = 'sess-paper'
   const cwd = 'E:\\research\\paper'
   const tabs = new Map([['browser', {}], ['files', {}]])
+  // Right sidebar: the documented isExpanded() read plus the native panel marker that changes with it.
+  let sidebarExpanded = false
+  const sidebarPanel = document.createElement('div')
+  sidebarPanel.setAttribute('data-sidebar-right-panel', 'push')
+  sidebarPanel.hidden = false
+  document.body.appendChild(sidebarPanel)
+  const setSidebar = (open) => { sidebarExpanded = open; if (open) sidebarPanel.setAttribute('data-sidebar-right-open', 'true'); else sidebarPanel.removeAttribute('data-sidebar-right-open') }
   const services = {
-    sidebarRight: { openResource: (address, options) => log.push(['openResource', address, options ?? null]), openTab: (kind, options) => log.push(['openTab', kind, options ?? null]) },
+    sidebarRight: { isExpanded: () => sidebarExpanded, openResource: (address, options) => log.push(['openResource', address, options ?? null]), openTab: (kind, options) => log.push(['openTab', kind, options ?? null]) },
     sidebarRightTabs: { get: (kind) => tabs.get(kind) },
     uiWorkspace: { openSession: (id) => log.push(['openSession', id]) },
     sessions: { binding: () => ({ session: { loadOlder: () => log.push(['loadOlder']) } }), refreshProjections: (id) => { log.push(['refreshProjections', id]); return Promise.resolve() } },
@@ -102,7 +109,7 @@
     useProjection: (key) => projections[key],
   }
   if (params.get('open') === 'no') api.close()
-  window.__summaryPreview = { api, client }
+  window.__summaryPreview = { api, client, setSidebar }
 
   function Page() {
     const [activeSession, setActiveSession] = React.useState(sessionId)
@@ -152,6 +159,19 @@
     await wait(700)
     check('card opens and pins by default', !!card() && api.prefs.getSnapshot().pinned === true)
     check('only changes expanded by default', [...card().querySelectorAll('.dss-sec-head[aria-expanded=true]')].map(button => button.closest('[data-section]').dataset.section).join(',') === 'changes')
+    const toggleButton = () => document.querySelector('[data-dsh-session-summary-toggle] button')
+    setSidebar(true); await wait(150)
+    check('expanded right sidebar hides the pinned card and frees its space', !card() && !document.querySelector('.dss-conversation-layout') && toggleButton().getAttribute('aria-expanded') === 'false' && api.prefs.getSnapshot().pinned === true)
+    toggleButton().click(); await wait(400)
+    check('header toggle reveals the card beside the sidebar', !!card() && api.prefs.getSnapshot().pinned === true && toggleButton().getAttribute('aria-expanded') === 'true')
+    toggleButton().click(); await wait(150)
+    check('toggle hides it again without unpinning', !card() && api.prefs.getSnapshot().pinned === true)
+    toggleButton().click(); await wait(150)
+    setSidebar(false); await wait(400)
+    check('closing the sidebar restores the pinned card', !!card() && !!document.querySelector('.dss-conversation-layout'))
+    setSidebar(true); await wait(150)
+    check('a reveal ends when the sidebar closes', !card())
+    setSidebar(false); await wait(400)
     for (const button of card().querySelectorAll('.dss-sec-head[aria-expanded=false]')) button.click()
     await wait(80)
     const text = card()?.textContent ?? ''

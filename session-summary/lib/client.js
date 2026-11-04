@@ -615,6 +615,30 @@ window.__ModuleLoader__.load({
       const maxHeight = Math.max(40, Math.min(viewport.height - top - (layout === 'stack' ? 160 : 24), viewport.height * (layout === 'stack' ? 0.45 : 0.72)))
       return { right, top, width, maxHeight, layout }
     }
+    // ------------------------------------------------------ right sidebar
+    // `ctx.sidebarRight.isExpanded()` is the documented truth; the panel's and
+    // frame's presentation markers only say when to read it again.
+    const SIDEBAR_MARKERS = Object.freeze(['data-sidebar-right-open', 'data-rightbar-collapsed', 'data-rightbar-fullscreen'])
+    function rightSidebarExpanded(sidebar, doc) {
+      if (typeof sidebar?.isExpanded === 'function') {
+        try { return sidebar.isExpanded() === true } catch { /* fall back to the panel marker */ }
+      }
+      const panels = doc?.querySelectorAll?.('[data-sidebar-right-panel][data-sidebar-right-open]')
+      return Boolean(panels) && [...panels].some((panel) => !panel.closest?.('[hidden]'))
+    }
+    function watchRightSidebar(sidebar, listener, doc) {
+      const stops = []
+      if (typeof MutationObserver === 'function' && doc?.documentElement) {
+        const observer = new MutationObserver(() => listener())
+        observer.observe(doc.documentElement, { subtree: true, attributes: true, attributeFilter: [...SIDEBAR_MARKERS] })
+        stops.push(() => observer.disconnect())
+      }
+      // The on-screen Session decides which surface isExpanded() reads.
+      if (typeof sidebar?.mounted?.subscribe === 'function') {
+        try { const stop = sidebar.mounted.subscribe(() => listener()); if (typeof stop === 'function') stops.push(stop) } catch { /* optional trigger */ }
+      }
+      return () => { for (const stop of stops.splice(0)) { try { stop() } catch { /* already released */ } } }
+    }
     /** Optional companion plugins reserve space below the summary, never inside its scroller. */
     function summaryAccessoryHeight() {
       if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return 0
@@ -1170,14 +1194,22 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
 
     const selectPrefs = (value) => value
     const selectOpenSession = (value) => value.openSession
+    const selectSidebarReveal = (value) => value.sidebarReveal
     const selectView = (value) => value.view
     const selectTip = (value) => value.tip
+    function useRightSidebarOpen(api) { return React.useSyncExternalStore(api.subscribeSidebar, api.sidebarOpen, api.sidebarOpen) }
 
     function SummaryToggle(props) {
       const { sessionId, api, t } = props
       const prefs = useStore(api.prefs, selectPrefs)
       const openSession = useStore(api.ui, selectOpenSession)
-      const open = prefs.pinned || openSession === sessionId
+      // An expanded right sidebar leaves the conversation too narrow for the
+      // card: it steps aside until the sidebar closes or this toggle reveals it.
+      const sidebarOpen = useRightSidebarOpen(api)
+      const revealed = useStore(api.ui, selectSidebarReveal)
+      React.useEffect(() => { if (!sidebarOpen) api.setSidebarReveal(false) }, [api, sidebarOpen])
+      const wanted = prefs.pinned || openSession === sessionId
+      const open = wanted && (!sidebarOpen || revealed)
       const [anchorElement, setAnchorElement] = React.useState(null)
       const buttonRef = React.useRef(null)
       React.useEffect(() => api.registerToggle(sessionId, buttonRef), [api, sessionId])
@@ -1185,7 +1217,16 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const useSessionStatus = props.useSessionStatus ?? fallbackSelectorHook
       const catalog = (props.useProjection ?? fallbackProjectionHook)('subagentCatalog')
       const busy = useSessionStatus(React.useCallback((statuses) => typeof statuses?.get === 'function' && Array.isArray(catalog) && catalog.some((entry) => statuses.get(entry?.id)?.running === true), [catalog]))
-      const onClick = () => { if (open) api.close(); else api.open(sessionId) }
+      const onClick = () => {
+        if (open) {
+          // Hiding a pinned card beside the sidebar keeps the pin for later.
+          if (sidebarOpen && prefs.pinned) api.setSidebarReveal(false)
+          else api.close()
+          return
+        }
+        if (sidebarOpen) api.setSidebarReveal(true)
+        if (!wanted) api.open(sessionId)
+      }
       const label = t(open ? 'toggle.close' : 'toggle.open')
       return h(ApiContext.Provider, { value: api },
         h('span', { ref: setAnchorElement, className: 'dss-anchor', 'data-dsh-session-summary-toggle': '' },
@@ -1376,9 +1417,9 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
     }
 
     // ---------------------------------------------------------------- apply
-    function createApi(ctx, { storage, fetchImpl, transportFetch, clipboard, openWindow }) {
+    function createApi(ctx, { storage, fetchImpl, transportFetch, clipboard, openWindow, document: doc = globalThis.document }) {
       const prefs = createStore(sanitizePrefs({}), { storage, key: STORAGE_KEY, sanitize: sanitizePrefs, serialize: ({ position }) => ({ position }) })
-      const ui = createStore({ openSession: null, cardHeight: 40 })
+      const ui = createStore({ openSession: null, cardHeight: 40, sidebarReveal: false })
       const view = createStore({ view: null })
       const tip = createStore({ tip: null })
       const summaries = createSummaryCache(fetchImpl)
@@ -1395,7 +1436,11 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         prefs, ui, view, tip, summaries, service,
         setPosition(position) { const next = sanitizePosition(position); prefs.set({ position: next, floating: next !== null }) },
         open(sessionId) { ui.set({ openSession: sessionId }) },
-        close() { prefs.set({ pinned: false }); ui.set({ openSession: null }) },
+        close() { prefs.set({ pinned: false }); ui.set({ openSession: null, sidebarReveal: false }) },
+        // Read on every render, so a Session switch never shows a stale value.
+        sidebarOpen: () => rightSidebarExpanded(service('sidebarRight'), doc),
+        subscribeSidebar: (listener) => watchRightSidebar(service('sidebarRight'), listener, doc),
+        setSidebarReveal(value) { ui.set({ sidebarReveal: value === true }) },
         togglePin(sessionId) {
           if (prefs.getSnapshot().pinned) { prefs.set({ pinned: false }); ui.set({ openSession: sessionId }) } else prefs.set({ pinned: true })
         },
@@ -1485,7 +1530,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         fetchImpl: (...args) => globalThis.fetch(...args),
         transportFetch: transport?.fetch ? transport.fetch.bind(transport) : (...args) => globalThis.fetch(...args),
         clipboard: globalThis.navigator?.clipboard,
-        openWindow: (url) => globalThis.open?.(url, '_blank', 'noopener,noreferrer')
+        openWindow: (url) => globalThis.open?.(url, '_blank', 'noopener,noreferrer'),
+        document: globalThis.document
       })
       ctx.effect(() => () => api.dispose(), '[session-summary] lifetime')
       const label = () => ctx.locale.bind(NS)('title')
@@ -1502,7 +1548,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       // Pure helpers exported for the package's own tests.
       deriveChat, aggregateChanges, deriveSubagents, deriveRelated, deriveJobs, deriveTodos, planModeActive, fileReferences, parseMcpName, callInfo,
       fileAddressFor, changesReviewAddress, subagentChatAddress, planAddress, changesSummaryUrl, formatDuration, formatTokens, basename, hostOf, displayPath,
-      createStore, sanitizePrefs, sanitizePosition, cardPlacement, summaryLayout, summaryAccessoryHeight, createSummaryCache, createApi, SummaryCard, SummaryCardHost, SummaryOverlay, SummaryToggle, SummaryData, ApiContext,
+      createStore, sanitizePrefs, sanitizePosition, cardPlacement, summaryLayout, summaryAccessoryHeight, createSummaryCache, createApi, rightSidebarExpanded, watchRightSidebar, SummaryCard, SummaryCardHost, SummaryOverlay, SummaryToggle, SummaryData, ApiContext,
       HOST_ICONS, ZH, EN, CSS, SLOT, ENTRY_ID, OVERLAY_SLOT, OVERLAY_ID, STORAGE_KEY, SECTION_IDS
     }
   }
