@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire, registerHooks } from 'node:module';
 import { runtimeDir } from '../../session-summary/scripts/extract-test-runtime.mjs';
 import { offlineGuard } from '../../side-branch/scripts/offline-test-guard.mjs';
-import { createGuardianService, SUPPORTED_NATIVE_VERSION } from '../lib/index.js';
+import { createGuardianService, SUPPORTED_NATIVE_VERSIONS } from '../lib/index.js';
 import { createGuardianStore, jsonObjectSchema } from '../lib/store.js';
 import { createLifecycleState, applyLifecycle } from '../lib/recovery.js';
 import { foldQuestions } from '../lib/questions.js';
@@ -25,8 +25,8 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 } });
-const [{ Context }, llm] = await Promise.all([
-  runtimeImport('@deepseek-ai/cordis'), runtimeImport('@deepseek-ai/dsh-llm'),
+const [{ Context }, llm, { PluginPackages }] = await Promise.all([
+  runtimeImport('@deepseek-ai/cordis'), runtimeImport('@deepseek-ai/dsh-llm'), runtimeImport('@deepseek-ai/dsh-app-boot'),
 ]);
 const PROVIDER = 'codex-relay', MODEL = 'gpt-6.1-terra';
 const OVERLOAD = 'server_error: Our servers are currently overloaded. Please try again later.';
@@ -111,12 +111,13 @@ async function createLoopHost(t, failures, { enabled = true } = {}) {
       if (last?.kind === 'retry_scheduled') scheduled.push(structuredClone(change.value));
     });
     const manifest = JSON.parse(await fs.readFile(path.join(path.dirname(runtimeFile('@deepseek-ai/dsh-llm-retry')), '..', 'package.json'), 'utf8'));
-    assert.equal(manifest.version, SUPPORTED_NATIVE_VERSION, 'this test must use the supported actual native implementation');
+    assert.ok(SUPPORTED_NATIVE_VERSIONS.includes(manifest.version), `unverified native version: ${manifest.version}`);
+    ctx.baseUrl = pathToFileURL(runtimeDir + path.sep).href;
+    new PluginPackages(ctx);
     guardian = createGuardianService(ctx, {
       // The OS lease is independently tested elsewhere. This test process has a
       // strict no-socket guard and an isolated native storage root.
       leaseFactory: async () => ({ close: async () => {} }),
-      compatibilityReader: async () => ({ supported: true, version: manifest.version, reason: 'isolated_native_contract' }),
       storeFactory: async (storageDomain, options) => { store = await createGuardianStore(storageDomain, options); return store; },
       startupSetter: async () => { throw new Error('startup is forbidden in this request-loop test'); },
       retryOptions: { random: () => 0.5, wait: async (delayMs, signal) => {
@@ -140,6 +141,7 @@ async function createLoopHost(t, failures, { enabled = true } = {}) {
     assert.equal(initial.record.settings.autoSelectFirst, true);
     assert.equal(initial.record.guardEnabledAt, null);
     assert.equal(initial.fault, null);
+    assert.deepEqual(initial.compatibility, { supported: true, version: manifest.version, reason: 'verified_contract' });
     if (!enabled) {
       const result = await guardian.configure({ sessionId: id, epoch: 0, settings: { enabled: false } });
       assert.equal(result.record.settings.enabled, false);

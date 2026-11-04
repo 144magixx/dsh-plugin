@@ -1,9 +1,10 @@
 const LOCAL_MAX_DELAY_MS = 300_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
-// This key format intentionally matches @deepseek-ai/dsh-llm-retry 0.2.1-rc.3
-// (llmRetry projection stateVersion 1). Recheck it when upgrading the host.
-export const NATIVE_RETRY_COMPATIBILITY = '@deepseek-ai/dsh-llm-retry@0.2.1-rc.3;llmRetry@1';
+// These versions share the verified llmRetry stateVersion 1 key and handoff
+// contract. Keep an exact allowlist: newer releases must be checked before use.
+export const SUPPORTED_NATIVE_VERSIONS = Object.freeze(['0.2.1-rc.3', '0.2.1-rc.5']);
+export const NATIVE_RETRY_COMPATIBILITY = SUPPORTED_NATIVE_VERSIONS.map(version => `@deepseek-ai/dsh-llm-retry@${version};llmRetry@1`).join(', ');
 
 /** Parse a Retry-After header (seconds or HTTP date) into milliseconds. */
 export function parseRetryAfter(value, { nowMs = Date.now() } = {}) {
