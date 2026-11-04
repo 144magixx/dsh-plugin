@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>会话图表 · 新样式预览</title>
+<style>
+  .light{--dsw-alias-bg-base:#fff;--dsw-alias-border-l1:#0000000a;--dsw-alias-border-l2:#0000001a;--dsw-alias-label-primary:#0f1115;--dsw-alias-label-secondary:#61666b;--dsw-alias-label-tertiary:#81858c;--dsw-alias-markdown-code-block:#f9fafb;--dsw-alias-interactive-bg-hover:#2631480f;--dsw-alias-state-error-primary:#ef4444}
+  .dark{--dsw-alias-bg-base:#151517;--dsw-alias-border-l1:#ffffff0f;--dsw-alias-border-l2:#ffffff1f;--dsw-alias-label-primary:#f9fafb;--dsw-alias-label-secondary:#cfd3d6;--dsw-alias-label-tertiary:#adb2b8;--dsw-alias-markdown-code-block:#1b1b1c;--dsw-alias-interactive-bg-hover:#ffffff14;--dsw-alias-state-error-primary:#f87171}
+  html,body{margin:0}
+  body{display:flex;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif}
+  [data-scheme]{box-sizing:border-box;width:812px;padding:28px 32px 36px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}
+  .badge{display:inline-block;margin-bottom:18px;padding:2px 10px;border-radius:999px;font-size:12px;color:var(--dsw-alias-label-secondary);border:1px solid var(--dsw-alias-border-l2)}
+  p{margin:0 0 12px;font-size:15px;line-height:26px}
+  p+div{margin-bottom:26px}
+</style>
+</head>
+<body>
+  <main class="light" data-scheme="light">
+    <span class="badge">浅色主题</span>
+    <p>例如：</p><div data-flow></div>
+    <p>以先登录 Risk API、再访问 MyDB 为例，常见流程是：</p><div data-seq></div>
+  </main>
+  <main class="dark" data-scheme="dark">
+    <span class="badge">深色主题</span>
+    <p>例如：</p><div data-flow></div>
+    <p>以先登录 Risk API、再访问 MyDB 为例，常见流程是：</p><div data-seq></div>
+  </main>
+  <script src="preview.js"></script>
+</body>
+</html>
