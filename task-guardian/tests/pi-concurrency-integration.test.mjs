@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire, registerHooks } from 'node:module';
 import { runtimeDir } from '../../session-summary/scripts/extract-test-runtime.mjs';
 import { offlineGuard } from '../../side-branch/scripts/offline-test-guard.mjs';
-import { createGuardianService, SUPPORTED_NATIVE_VERSION } from '../lib/index.js';
+import { createGuardianService, SUPPORTED_NATIVE_VERSIONS } from '../lib/index.js';
 import { createGuardianStore, jsonObjectSchema } from '../lib/store.js';
 import { createLifecycleState, applyLifecycle } from '../lib/recovery.js';
 import { foldQuestions } from '../lib/questions.js';
@@ -25,8 +25,8 @@ registerHooks({ resolve(specifier, context, nextResolve) {
   }
   return nextResolve(specifier, context);
 } });
-const [{ Context }, llm] = await Promise.all([
-  runtimeImport('@deepseek-ai/cordis'), runtimeImport('@deepseek-ai/dsh-llm'),
+const [{ Context }, llm, { PluginPackages }] = await Promise.all([
+  runtimeImport('@deepseek-ai/cordis'), runtimeImport('@deepseek-ai/dsh-llm'), runtimeImport('@deepseek-ai/dsh-app-boot'),
 ]);
 const PROVIDER = 'codex-relay', MODEL = 'gpt-6.1-terra';
 const CONCURRENCY = 'gateway_concurrency_limit: Concurrency limit exceeded for user, please retry later';
@@ -151,10 +151,11 @@ async function createLoopHost(t, plan, { withCounter = false } = {}) {
       if (change.value?.audit?.at(-1)?.kind === 'retry_scheduled') scheduled.push(structuredClone(change.value));
     });
     const manifest = JSON.parse(await fs.readFile(path.join(path.dirname(runtimeFile('@deepseek-ai/dsh-llm-retry')), '..', 'package.json'), 'utf8'));
-    assert.equal(manifest.version, SUPPORTED_NATIVE_VERSION);
+    assert.ok(SUPPORTED_NATIVE_VERSIONS.includes(manifest.version), `unverified native version: ${manifest.version}`);
+    ctx.baseUrl = pathToFileURL(runtimeDir + path.sep).href;
+    new PluginPackages(ctx);
     guardian = createGuardianService(ctx, {
       leaseFactory: async () => ({ close: async () => {} }),
-      compatibilityReader: async () => ({ supported: true, version: manifest.version, reason: 'isolated_native_contract' }),
       storeFactory: async (storageDomain, options) => { store = await createGuardianStore(storageDomain, options); return store; },
       startupSetter: async () => { throw new Error('Startup mutation is forbidden in this request-loop test.'); },
       retryOptions: { random: () => 0.5, wait: async (delayMs, signal) => {
@@ -177,6 +178,7 @@ async function createLoopHost(t, plan, { withCounter = false } = {}) {
       'all three defaults must be on without calling configure');
     assert.equal(initial.record.guardEnabledAt, null);
     assert.equal(initial.fault, null);
+    assert.deepEqual(initial.compatibility, { supported: true, version: manifest.version, reason: 'verified_contract' });
     assert.equal(initial.record.audit.some(entry => entry.kind === 'user_settings_changed'), false);
     return { ctx, root, adapter, counter, toolExecutions, guardian, store, agent: handle.agent,
       diagnostics, emittedErrors, failuresSeen, scheduled, waits, nativeRetries, requestPositions, initial,

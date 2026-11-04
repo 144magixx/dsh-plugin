@@ -8,9 +8,9 @@ import { extractPackages, runtimeDir } from '../../session-summary/scripts/extra
 import * as plugin from '../lib/index.js';
 import { createGuardianStore, acquireLease } from '../lib/store.js';
 
-extractPackages(['@deepseek-ai/cordis', '@deepseek-ai/dsh-storage', '@deepseek-ai/dsh-storage-json', '@deepseek-ai/dsh-storage-domain', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-query', '@deepseek-ai/dsh-session-projection', '@deepseek-ai/dsh-llm-retry']);
+extractPackages(['@deepseek-ai/cordis', '@deepseek-ai/dsh-storage', '@deepseek-ai/dsh-storage-json', '@deepseek-ai/dsh-storage-domain', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-query', '@deepseek-ai/dsh-session-projection', '@deepseek-ai/dsh-llm-retry', '@deepseek-ai/dsh-app-boot']);
 const native = name => import(pathToFileURL(path.join(runtimeDir, 'node_modules/@deepseek-ai', name, 'lib/index.js')).href);
-const [{ Context }, { Storage }, json, domain, { Session }, { SessionQueryEngine }, { SessionProjectionRegistry }, retry] = await Promise.all(['cordis', 'dsh-storage', 'dsh-storage-json', 'dsh-storage-domain', 'dsh-session', 'dsh-session-query', 'dsh-session-projection', 'dsh-llm-retry'].map(native));
+const [{ Context }, { Storage }, json, domain, { Session }, { SessionQueryEngine }, { SessionProjectionRegistry }, retry, { PluginPackages }] = await Promise.all(['cordis', 'dsh-storage', 'dsh-storage-json', 'dsh-storage-domain', 'dsh-session', 'dsh-session-query', 'dsh-session-projection', 'dsh-llm-retry', 'dsh-app-boot'].map(native));
 
 async function host(t, directory) {
   const root = directory || await fs.mkdtemp(path.join(os.tmpdir(), 'guardian-native-'));
@@ -21,7 +21,8 @@ async function host(t, directory) {
   ctx.provide('sessions', { get: id => sessions.get(id) });
   new SessionQueryEngine(ctx);
   ctx.provide('agents', { get: id => agents.get(id), list: () => [...agents.values()] });
-  ctx.provide('pluginPackages', { packageOf: name => ({ dir: path.join(runtimeDir, 'node_modules', name) }) });
+  ctx.baseUrl = pathToFileURL(runtimeDir + path.sep).href;
+  new PluginPackages(ctx);
   ctx.provide('connection', { fetch: { register: route => { routes.set(route.path, route); return async () => { routes.delete(route.path); }; } } });
   ctx.provide('tools', { register: tool => { tools.set(tool.name, tool); return () => tools.delete(tool.name); } });
   for (const id of ['session-a', 'session-b']) {

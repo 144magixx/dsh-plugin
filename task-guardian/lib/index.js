@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { acquireLease, createGuardianStore, defaultRecord, DEFAULT_SETTINGS, jsonObjectSchema } from './store.js';
-import { registerRetryMiddleware } from './retry.js';
+import { registerRetryMiddleware, SUPPORTED_NATIVE_VERSIONS } from './retry.js';
 import { createLifecycleState, applyLifecycle, assessRecovery } from './recovery.js';
 import { foldQuestions, questionViews } from './questions.js';
 import { buildStartupPlan, setStartup } from './startup.js';
@@ -11,7 +11,9 @@ export const name = 'dsh-task-guardian';
 export const inject = ['connection', 'storageDomain', 'sessionProjections', 'sessionQuery', 'agents'];
 const LIFE = 'taskGuardianLifecycle';
 const QUESTIONS = 'taskGuardianQuestions';
-export const SUPPORTED_NATIVE_VERSION = '0.2.1-rc.3';
+export { SUPPORTED_NATIVE_VERSIONS };
+// Retain the original single-version export for existing consumers.
+export const SUPPORTED_NATIVE_VERSION = SUPPORTED_NATIVE_VERSIONS[0];
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const optional = (ctx, key) => { try { return ctx.get?.(key); } catch { return undefined; } };
 function failure(code, status = 400) { return Object.assign(new Error(code), { code, status }); }
@@ -26,7 +28,8 @@ export async function detectCompatibility(ctx) {
     const info = packages?.packageOf('@deepseek-ai/dsh-llm-retry', ctx.baseUrl);
     if (!info?.dir) return { supported: false, reason: 'native_version_unavailable' };
     const manifest = JSON.parse(await fs.readFile(path.join(info.dir, 'package.json'), 'utf8'));
-    return { supported: manifest.name === '@deepseek-ai/dsh-llm-retry' && manifest.version === SUPPORTED_NATIVE_VERSION, version: manifest.version, reason: manifest.version === SUPPORTED_NATIVE_VERSION ? 'verified_contract' : 'native_version_unsupported' };
+    const supported = manifest.name === '@deepseek-ai/dsh-llm-retry' && SUPPORTED_NATIVE_VERSIONS.includes(manifest.version);
+    return { supported, version: manifest.version, reason: supported ? 'verified_contract' : 'native_version_unsupported' };
   } catch { return { supported: false, reason: 'native_version_unavailable' }; }
 }
 

@@ -421,7 +421,8 @@ test('native exhaustion matches exact provider and sorted resolved policy keys',
   assert.equal(nativeExhausted(host.ctx, { ...payload, retryPolicy: policy({ maxRetries: 1 }) }), false);
   assert.equal(nativeExhausted(host.ctx, payloadFor(host.session('session-b'))), false);
   assert.match(NATIVE_RETRY_COMPATIBILITY, /0\.2\.1-rc\.3;llmRetry@1/u);
-  assert.equal(runtimeRequire('@deepseek-ai/dsh-llm-retry/package.json').version, '0.2.1-rc.3');
+  const version = runtimeRequire('@deepseek-ai/dsh-llm-retry/package.json').version;
+  assert.ok(NATIVE_RETRY_COMPATIBILITY.split(', ').includes(`@deepseek-ai/dsh-llm-retry@${version};llmRetry@1`), `unverified native version: ${version}`);
 });
 
 test('PI overload delegated by native code filtering starts a fresh 30-second guardian chain at native count zero', async t => {
