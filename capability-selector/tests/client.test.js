@@ -283,3 +283,24 @@ test('card loading and failure do not fabricate totals and all helper states loc
     assert.equal(text(find(empty, 'dsc-card-stats')), t(dictionary)('cardStats', { skills: 0, cli: 0, mcp: 0 }));
   }
 });
+
+test('the dock steps aside for an expanded right sidebar unless a summary card was revealed there', () => {
+  const { rightSidebarExpanded, watchRightSidebar, dockHidden } = client;
+  const marker = hidden => ({ closest: selector => (selector === '[hidden]' && hidden ? {} : null) });
+  const doc = panels => ({ documentElement: {}, querySelectorAll: () => panels });
+  assert.equal(rightSidebarExpanded({ isExpanded: () => true }, doc([])), true);
+  assert.equal(rightSidebarExpanded({ isExpanded: () => false }, doc([marker(false)])), false);
+  assert.equal(rightSidebarExpanded({ isExpanded() { throw new Error('no surface'); } }, doc([marker(false)])), true);
+  assert.equal(rightSidebarExpanded(undefined, doc([marker(true)])), false, 'background Session panels do not count');
+  assert.equal(rightSidebarExpanded(undefined, undefined), false);
+  assert.equal(dockHidden(false, null), false);
+  assert.equal(dockHidden(true, null), true);
+  assert.equal(dockHidden(true, {}), false, 'a revealed summary brings its accessory along');
+  const listeners = new Set();
+  let calls = 0;
+  const stop = watchRightSidebar({ mounted: { subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); } } }, () => { calls++; }, undefined);
+  for (const fn of listeners) fn();
+  assert.equal(calls, 1);
+  stop(); stop();
+  assert.equal(listeners.size, 0);
+});

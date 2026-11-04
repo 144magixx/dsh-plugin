@@ -1,6 +1,6 @@
 {
   "name": "dsh-capability-selector",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Discover and deduplicate local Skills, enterprise CLIs and MCP configurations; choose capabilities for the current DSH task.",
   "type": "module",
   "license": "MIT",

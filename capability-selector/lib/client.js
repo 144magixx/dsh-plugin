@@ -142,7 +142,31 @@ window.__ModuleLoader__.load({
       }, [ref, target?.left, target?.top, target?.width, target?.height])
       return target ? { left: target.left + offset.x, top: target.top + offset.y, width: target.width, height: target.height } : { visibility: 'hidden', left: 0, top: 0 }
     }
-    function useDockGeometry(sessionId, anchors, dockRef) {
+    // `ctx.sidebarRight.isExpanded()` is the documented truth; the panel's and
+    // frame's presentation markers only say when to read it again.
+    const SIDEBAR_MARKERS = Object.freeze(['data-sidebar-right-open', 'data-rightbar-collapsed', 'data-rightbar-fullscreen'])
+    function rightSidebarExpanded(sidebar, doc) {
+      if (typeof sidebar?.isExpanded === 'function') {
+        try { return sidebar.isExpanded() === true } catch { /* fall back to the panel marker */ }
+      }
+      const panels = doc?.querySelectorAll?.('[data-sidebar-right-panel][data-sidebar-right-open]')
+      return Boolean(panels) && [...panels].some(panel => !panel.closest?.('[hidden]'))
+    }
+    function watchRightSidebar(sidebar, listener, doc) {
+      const stops = []
+      if (typeof MutationObserver === 'function' && doc?.documentElement) {
+        const observer = new MutationObserver(() => listener())
+        observer.observe(doc.documentElement, { subtree: true, attributes: true, attributeFilter: [...SIDEBAR_MARKERS] })
+        stops.push(() => observer.disconnect())
+      }
+      if (typeof sidebar?.mounted?.subscribe === 'function') {
+        try { const stop = sidebar.mounted.subscribe(() => listener()); if (typeof stop === 'function') stops.push(stop) } catch { /* optional trigger */ }
+      }
+      return () => { for (const stop of stops.splice(0)) { try { stop() } catch { /* already released */ } } }
+    }
+    /** Beside an expanded right sidebar the dock shows only with a summary card the user revealed there. */
+    function dockHidden(sidebarOpen, summaryShown) { return sidebarOpen === true && !summaryShown }
+    function useDockGeometry(sessionId, anchors, dockRef, sidebarOpen = false) {
       const [geometry, setGeometry] = React.useState(null)
       React.useLayoutEffect(() => {
         if (!sessionId) { setGeometry(null); return }
@@ -150,6 +174,13 @@ window.__ModuleLoader__.load({
         const root = document.documentElement, previousReserve = root.style.getPropertyValue('--dsh-summary-accessory-height')
         const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
         const summaryObserver = typeof MutationObserver === 'function' ? new MutationObserver(schedule) : null
+        function releaseReserve() {
+          if (writtenReserve !== undefined && root.style.getPropertyValue('--dsh-summary-accessory-height') === writtenReserve) {
+            if (previousReserve) root.style.setProperty('--dsh-summary-accessory-height', previousReserve); else root.style.removeProperty('--dsh-summary-accessory-height')
+            window.dispatchEvent(new Event('dsh:summary-accessory-change'))
+          }
+          writtenReserve = undefined
+        }
         function measure() {
           if (stopped) return
           const found = document.getElementById('dsh-session-summary-card')
@@ -161,6 +192,12 @@ window.__ModuleLoader__.load({
             if (summary) { resizeObserver?.observe(summary); summaryObserver?.observe(summary, { attributes: true, attributeFilter: ['style', 'data-layout'] }) }
             if (header) resizeObserver?.observe(header)
             if (ownDock) resizeObserver?.observe(ownDock)
+          }
+          if (dockHidden(sidebarOpen, summary)) {
+            // Hidden docks reserve nothing; the body observer still sees a revealed summary.
+            releaseReserve()
+            setGeometry(old => old?.hidden ? old : { hidden: true })
+            return
           }
           const viewport = viewportOf(window), dock = dockPlacement(summary?.getBoundingClientRect(), header?.getBoundingClientRect(), viewport, ownDock?.getBoundingClientRect().height)
           const reserve = `${Math.ceil(dock.height) + RESERVE_GAP}px`
@@ -182,12 +219,9 @@ window.__ModuleLoader__.load({
           stopped = true; cancelAnimationFrame(frame); observer?.disconnect(); resizeObserver?.disconnect(); summaryObserver?.disconnect()
           window.removeEventListener('resize', schedule); window.removeEventListener('scroll', schedule, true); window.removeEventListener('dsh:summary-accessory-change', schedule)
           window.visualViewport?.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('scroll', schedule)
-          if (writtenReserve !== undefined && root.style.getPropertyValue('--dsh-summary-accessory-height') === writtenReserve) {
-            if (previousReserve) root.style.setProperty('--dsh-summary-accessory-height', previousReserve); else root.style.removeProperty('--dsh-summary-accessory-height')
-            window.dispatchEvent(new Event('dsh:summary-accessory-change'))
-          }
+          releaseReserve()
         }
-      }, [sessionId, anchors, dockRef])
+      }, [sessionId, anchors, dockRef, sidebarOpen])
       return geometry
     }
     function CapabilityAnchor({ sessionId, anchors }) {
@@ -272,7 +306,8 @@ window.__ModuleLoader__.load({
         h('span', { className: 'dsc-card-hint', role: state.status === 'error' ? 'status' : undefined }, hint,
           state.selectedIds.length ? h('span', { className: 'dsc-selected-count' }, ' · ', t('selected', { count: state.selectedIds.length })) : null))
     }
-    function CapabilityOverlay({ api, anchors, uiSession, sessions, t, renderSlot = () => null }) {
+    const CLOSED_SIDEBAR = Object.freeze({ subscribe: () => () => {}, read: () => false })
+    function CapabilityOverlay({ api, anchors, uiSession, sessions, t, renderSlot = () => null, sidebar = CLOSED_SIDEBAR }) {
       const active = useStore(uiSession.current), state = useStore(api)
       const sessionId = active?.key
       React.useLayoutEffect(() => { api.setSession(sessionId, sessionId ? sessions.binding(sessionId) : undefined) }, [api, sessions, sessionId, active?.ctx])
@@ -280,11 +315,15 @@ window.__ModuleLoader__.load({
         const current = api.getSnapshot()
         if (sessionId && current.sessionId === sessionId && current.status === 'idle') void api.scan()
       }, [api, sessionId, state.sessionId, state.status])
+      const sidebarOpen = React.useSyncExternalStore(sidebar.subscribe, sidebar.read, sidebar.read)
       const triggerRef = React.useRef(null), dockRef = React.useRef(null)
-      const geometry = useDockGeometry(sessionId, anchors, dockRef)
-      const dockStyle = { ...useFixedPosition(dockRef, geometry?.dock), height: 'auto', maxHeight: geometry?.dock.maxHeight }
+      const geometry = useDockGeometry(sessionId, anchors, dockRef, sidebarOpen)
+      const hidden = geometry?.hidden === true
+      const dockStyle = { ...useFixedPosition(dockRef, geometry?.dock), height: 'auto', maxHeight: geometry?.dock?.maxHeight }
       React.useEffect(() => { if (!state.notice || state.open) return; const timer = setTimeout(() => api.set({ notice: '' }), 4000); return () => clearTimeout(timer) }, [api, state.notice, state.open])
-      if (!sessionId || !geometry) return null
+      // A panel left open would otherwise pop back when the sidebar closes.
+      React.useEffect(() => { if (hidden && state.open) api.close() }, [api, hidden, state.open])
+      if (!sessionId || !geometry || hidden) return null
       return h('div', { className: 'dsc-root', 'data-dsh-capability-selector': '' },
         h('div', { ref: dockRef, className: 'dsc-dock', style: dockStyle },
           h('div', { className: 'dsc-controls' }, h(CapabilityCard, { api, state, t, triggerRef })),
@@ -300,9 +339,12 @@ window.__ModuleLoader__.load({
       ctx.effect(() => { const element = document.createElement('style'); element.dataset.plugin = NAME; element.textContent = CSS; document.head.appendChild(element); return () => element.remove() })
       ctx.effect(() => () => api.dispose())
       const label = () => t('title')
+      // Optional service: read lazily so plugin load order never matters.
+      const sidebarRight = () => { try { return ctx.get?.('sidebarRight') } catch { return undefined } }
+      const sidebar = { read: () => rightSidebarExpanded(sidebarRight(), globalThis.document), subscribe: listener => watchRightSidebar(sidebarRight(), listener, globalThis.document) }
       ctx.effect(() => ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({ name: 'conversation.session.header.utilities', id: `${NAME}.anchor`, order: 110, locale: NS, label, inject: () => ({ anchors }) }, CapabilityAnchor)))
-      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: `${NAME}.overlay`, order: 50, locale: NS, label, children: { [ACCESSORIES]: { kind: 'list', scope: 'root' } }, inject: () => ({ api, anchors, uiSession: ctx.uiSession, sessions: ctx.sessions }) }, CapabilityOverlay)))
+      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: `${NAME}.overlay`, order: 50, locale: NS, label, children: { [ACCESSORIES]: { kind: 'list', scope: 'root' } }, inject: () => ({ api, anchors, uiSession: ctx.uiSession, sessions: ctx.sessions, sidebar }) }, CapabilityOverlay)))
     }
-    return { name: NAME, inject: ['slots', 'locale', 'uiSession', 'sessions', 'conversation'], apply, createController, createStore, dockPlacement, useDockGeometry, ACCESSORIES, panelPlacement, filterItems, buildSelectionText, requestJSON, CSS, ZH, EN, CapabilityPanel, CapabilityCard, CapabilityOverlay, CapabilityAnchor, Details }
+    return { name: NAME, inject: ['slots', 'locale', 'uiSession', 'sessions', 'conversation'], apply, createController, createStore, dockPlacement, useDockGeometry, rightSidebarExpanded, watchRightSidebar, dockHidden, ACCESSORIES, panelPlacement, filterItems, buildSelectionText, requestJSON, CSS, ZH, EN, CapabilityPanel, CapabilityCard, CapabilityOverlay, CapabilityAnchor, Details }
   },
 })

@@ -153,6 +153,10 @@
   }
   const root = shared['react-dom/client'].createRoot(document.getElementById('root'))
   root.render(h(Page))
+  // The native right sidebar panel marker; neither fixture api exposes sidebarRight, so both plugins read it.
+  const sidebarPanel = document.createElement('div')
+  sidebarPanel.setAttribute('data-sidebar-right-panel', 'push')
+  document.body.appendChild(sidebarPanel)
   window.__capabilityBrowser = {
     errors, native: true, api, summaryApi, appendCalls, copies, current, inputHub,
     scanRequests, language,
@@ -166,6 +170,7 @@
     switchSession(id) { const binding = bindings.get(id); current.set({ key: id, ctx: binding.ctx, fixtureRevision: (current.getSnapshot().fixtureRevision ?? 0) + 1 }) },
     replaceBinding() { const id = current.getSnapshot().key; const binding = scope(id); return binding.sessionId },
     summaryPresent(value) { view.set({ withSummary: value }) },
+    setSidebar(open) { sidebarPanel.toggleAttribute('data-sidebar-right-open', open) },
     summaryLong() { summaryApi.prefs.set({ collapsed: { ...summaryApi.prefs.getSnapshot().collapsed, subagents: false, sources: false } }); document.querySelector('[data-section="changes"] .dss-more')?.click() },
     growSummary() { const currentView = summaryApi.view.getSnapshot().view; const files = Array.from({ length: 64 }, (_, i) => ({ path: `src/growth-${i}/component.js`, display: `src/growth-${i}/component.js`, added: 10, deleted: 0, latest: { seq: 11, turn: 1, index: i } })); summaryApi.publish(current.getSnapshot().key, { model: { ...currentView.model, changes: { ...currentView.model.changes, files, total: files.length, added: 640, deleted: 0 } } }); document.querySelector('[data-section="changes"] .dss-more')?.click() },
     resetSummary() { summaryApi.setPosition(null); summaryApi.prefs.set({ pinned: true }); summaryApi.open(current.getSnapshot().key) },

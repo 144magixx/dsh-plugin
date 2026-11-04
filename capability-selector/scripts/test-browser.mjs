@@ -169,6 +169,18 @@ try {
   await check('Escape preserves pinned summary', '!!document.querySelector("[data-dsh-session-summary]")');
   await open(); await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: 330, y: 60, button: 'left', buttons: 1, clickCount: 1 }); await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 330, y: 60, button: 'left', clickCount: 1 }); await settle();
   await check('outside pointer closes panel and keeps summary', '!document.querySelector(".dsc-panel") && !!document.querySelector("[data-dsh-session-summary]")');
+  // An expanded right sidebar hides the whole stack; the summary toggle reveals it together.
+  await open();
+  await evaluate(`${fixture}.setSidebar(true)`); await settle(); await settle();
+  await check('expanded right sidebar hides summary, capability card and its panel', `!document.querySelector('[data-dsh-session-summary]') && !document.querySelector('.dsc-dock') && !document.querySelector('.dsc-panel') && !${fixture}.api.getSnapshot().open && !document.documentElement.style.getPropertyValue('--dsh-summary-accessory-height') && !document.querySelector('.dss-conversation-layout')`);
+  await click('[data-dsh-session-summary-toggle] button'); await settle();
+  await check('summary toggle reveals summary and capability card beside the sidebar', `!!document.querySelector('[data-dsh-session-summary]') && !!document.querySelector('.dsc-trigger') && !document.querySelector('.dsc-panel')`);
+  await gapCheck('revealed card keeps its place below the summary');
+  await click('[data-dsh-session-summary-toggle] button'); await settle(); await settle();
+  await check('toggle hides the revealed stack again and keeps the pin', `!document.querySelector('[data-dsh-session-summary]') && !document.querySelector('.dsc-dock') && ${fixture}.summaryApi.prefs.getSnapshot().pinned`);
+  await evaluate(`${fixture}.setSidebar(false)`); await settle(); await settle();
+  await check('closing the sidebar restores summary and capability card', `!!document.querySelector('[data-dsh-session-summary]') && !!document.querySelector('.dsc-trigger')`);
+  await gapCheck('restored card reserves its space again');
   // Real pointer drag of the summary, including low viewport clamping.
   await evaluate(`${fixture}.resetSummary()`); await settle();
   const dragHandle = await box('[data-dss-drag-handle]'); const dx = dragHandle.left + 35, dy = dragHandle.top + dragHandle.height / 2;
