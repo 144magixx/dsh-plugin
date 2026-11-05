@@ -1,1 +1,1 @@
-{"meta":{"title":"Task Guardian","description":"Per-session transient request retries, durable audit, recovery review and question deadlines. Unclassified questions and restart recovery require human confirmation in this version."}}
+{"meta":{"title":"Task Alerts","description":"Persistent cross-session interruption alerts in the right-side card, with session navigation, individual read acknowledgements and mark all as read."}}

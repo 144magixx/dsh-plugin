@@ -3,29 +3,34 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
-export const DEFAULT_SETTINGS = Object.freeze({ enabled: true, recoverAfterRestart: true, autoSelectFirst: true });
 export const schema = check => ({
-  parse(value) { if (!check(value)) throw new Error('Task Guardian: invalid persisted data; manual inspection required.'); return structuredClone(value); },
+  parse(value) { if (!check(value)) throw new Error('Task alerts: invalid persisted data.'); return structuredClone(value); },
   safeParse(value) { try { return { success: true, data: this.parse(value) }; } catch (error) { return { success: false, error }; } },
 });
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-export const recordSchema = schema(value => object(value) && value.version === 1 && typeof value.sessionId === 'string' && Number.isSafeInteger(value.revision) && value.revision >= 0 && Number.isSafeInteger(value.epoch) && value.epoch >= 0 && object(value.settings) && Object.keys(DEFAULT_SETTINGS).every(key => typeof value.settings[key] === 'boolean') && object(value.run) && object(value.retry) && object(value.recovery) && Array.isArray(value.audit));
+export const recordSchema = schema(value => object(value) && value.version === 1 && typeof value.sessionId === 'string'
+  && Number.isSafeInteger(value.revision) && value.revision >= 0 && Array.isArray(value.audit)
+  && (value.notification == null || object(value.notification) && typeof value.notification.id === 'string'
+    && typeof value.notification.sessionId === 'string' && typeof value.notification.acknowledged === 'boolean'));
 export const jsonObjectSchema = schema(object);
 export function defaultRecord(sessionId, now = Date.now()) {
-  return { version: 1, sessionId, revision: 0, epoch: 0, settings: { ...DEFAULT_SETTINGS }, guardEnabledAt: null, updatedAt: now, run: { phase: 'idle', lastSeq: -1 }, retry: { attempt: 0, retryAt: null }, recovery: { status: 'not_needed', reasonCode: 'no_unfinished_work', reason: '暂无待恢复的运行记录。' }, audit: [] };
+  return { version: 1, sessionId, revision: 0, updatedAt: now, audit: [] };
 }
 export function sessionKey(id) { return createHash('sha256').update(id).digest('hex'); }
+/** Keep existing reminder identities/acknowledgements; old guard authority is not carried forward. */
+function alertRecord(value) {
+  const next = { version: 1, sessionId: value.sessionId, revision: value.revision, updatedAt: value.updatedAt, audit: value.audit };
+  for (const key of ['notificationSeq', 'notificationProjectionVersion', 'notification']) if (Object.hasOwn(value, key)) next[key] = value[key];
+  return structuredClone(next);
+}
 
-/** A loopback socket is an OS-owned mutex, not an application HTTP server.
- * The OS releases it after kill/reboot. A collision fails closed; no stale PID lock is stolen.
- * All profiles under one data home share the lease because their storage routes may coincide.
- */
+/** A process lease prevents two Hosts from overwriting acknowledgements in the shared store. */
 export async function acquireLease({ identity = process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), onLost = () => {} } = {}) {
   const hash = createHash('sha256').update(path.resolve(identity)).digest().readUInt32BE(0);
   const port = 42000 + hash % 20000;
   const server = net.createServer(socket => socket.destroy());
   await new Promise((resolve, reject) => {
-    const fail = error => { server.close(); reject(new Error(`Task Guardian lease unavailable (${error.code || 'bind_failed'}); another Host or a port collision requires confirmation.`)); };
+    const fail = error => { server.close(); reject(new Error(`Task alerts lease unavailable (${error.code || 'bind_failed'}).`)); };
     server.once('error', fail);
     server.listen({ port, host: '127.0.0.1', exclusive: true }, () => { server.removeListener('error', fail); resolve(); });
   });
@@ -35,18 +40,14 @@ export async function acquireLease({ identity = process.env.DSH_HOME || path.joi
   return { port, close: () => new Promise(resolve => { if (closed) return resolve(); closed = true; server.close(() => resolve()); }) };
 }
 
-/** Native storage-domain supplies serialized, durable writes. Authorization and run state
- * share one record/revision, so a persisted revocation cannot be overwritten by an older retry.
- * The short audit tail is atomic with state; the separate audit table retains full history.
- */
-export async function createGuardianStore(storageDomain, { ownerId = randomUUID(), now = Date.now } = {}) {
+export async function createAlertStore(storageDomain, { ownerId = randomUUID(), now = Date.now } = {}) {
+  // Retain the domain and legacy tables to migrate existing reminders without replacing storage.
   const domain = await storageDomain.open({ name: 'task_guardian', version: 1, layout: 'per-record', tables: { sessions: { valueSchema: recordSchema }, audit: { valueSchema: jsonObjectSchema }, config: { valueSchema: jsonObjectSchema } } });
-  const sessions = domain.table('sessions');
-  const history = domain.table('audit');
+  const sessions = domain.table('sessions'), history = domain.table('audit');
   let chain = Promise.resolve(), closed = false, failure;
-  const get = id => structuredClone(sessions.get(sessionKey(id)) || defaultRecord(id, now()));
+  const get = id => alertRecord(sessions.get(sessionKey(id)) || defaultRecord(id, now()));
   const update = (id, kind, change) => {
-    if (closed || failure) return Promise.reject(failure || new Error('Task Guardian store is closed.'));
+    if (closed || failure) return Promise.reject(failure || new Error('Task alerts store is closed.'));
     const operation = chain.then(async () => {
       if (failure) throw failure;
       const current = get(id);
@@ -54,22 +55,26 @@ export async function createGuardianStore(storageDomain, { ownerId = randomUUID(
       if (changed === undefined) return current;
       const at = now(), revision = current.revision + 1;
       const entry = { id: randomUUID(), sessionId: id, revision, at, kind, ownerId };
-      const next = recordSchema.parse({ ...changed, version: 1, sessionId: id, revision, updatedAt: at, audit: [...current.audit, entry].slice(-64) });
+      const next = recordSchema.parse(alertRecord({ ...changed, version: 1, sessionId: id, revision, updatedAt: at, audit: [...current.audit, entry].slice(-64) }));
       try {
         await sessions.put(sessionKey(id), next);
-        // A failed audit publication leaves the primary state and its short audit tail durable.
-        await history.put(entry.id, { ...entry, settings: next.settings, epoch: next.epoch, run: next.run, retry: next.retry, decision: next.lastDecision ?? null, recovery: next.recovery });
+        await history.put(entry.id, { ...entry, notification: next.notification ?? null });
       } catch (error) { failure = error; throw error; }
       return structuredClone(next);
     });
     chain = operation.catch(() => {});
     return operation;
   };
+  try {
+    for (const [, record] of [...sessions.entries()]) {
+      if (['settings', 'epoch', 'run', 'retry', 'recovery', 'lifecycle', 'lastDecision', 'guardEnabledAt'].some(key => Object.hasOwn(record, key))) {
+        await update(record.sessionId, 'alerts_only_migrated', current => current);
+      }
+    }
+  } catch (error) { await domain.close(); throw error; }
   return {
     ownerId, get, update,
-    getStartup: () => structuredClone(domain.table('config').get('startup') || { enabled: false }),
-    setStartup(value) { if (closed || failure) return Promise.reject(failure || new Error('Task Guardian store is closed.')); const job = chain.then(async () => { if (failure) throw failure; await domain.table('config').put('startup', jsonObjectSchema.parse(value)); }); chain = job.catch(error => { failure = error; }); return job; },
-    list: () => [...sessions.entries()].map(([, value]) => structuredClone(value)),
+    list: () => [...sessions.entries()].map(([, value]) => alertRecord(value)),
     healthy: () => !closed && !failure,
     async close() { closed = true; await chain; await domain.close(); },
   };
