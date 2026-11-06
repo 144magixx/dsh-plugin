@@ -1,0 +1,23 @@
+Use case: ui-mockup
+Asset type: High fidelity desktop software right-sidebar UI proposal, shown as one clean flat screenshot for user approval.
+Primary request: Show how the user reorders the stacked cards in the right sidebar of the DeepSeek Harness desktop app by dragging, captured in the middle of a drag. Restrained native macOS / iOS feel, like reordering widgets. One clear recommended design, not a collage, not alternatives, no before/after.
+
+Canvas: 1024 x 1536 portrait. Very light neutral gray background (#F2F2F5). Cards share identical width, aligned to the same left and right edges (approximately x=90 to x=934), 20 px vertical gaps, white surfaces, very thin neutral gray hairline borders, large consistent rounded corners (~18 px), barely visible shadows. Black titles, medium gray supporting text, thin monochrome line icons. Chinese typography like PingFang SC, crisp.
+
+From top to bottom:
+
+Card 1 — session summary, fixed at the top, NOT draggable, about 100 px high: gray outline folder icon, bold title exactly "dsh-plugin". Right side: gray down chevron, blue pin icon, gray ellipsis, gray close X. No drag handle on this card.
+
+Card 2 — "外部能力", about 150 px high, resting normally: thin outline four-square icon, bold title exactly "外部能力", right side gray text "33 项" and a gray right chevron. Below the title, muted text exactly "Skills 22 · CLI 7 · MCP 4". This card is hovered: at the far left edge of its header, just outside the icon, a small vertical six-dot grip handle (two columns of three tiny gray dots) is visible, and the cursor is not shown.
+
+Card 3 — "常用对话", about 170 px high, resting: outline star icon, bold title exactly "常用对话", small gray count "3". Two short rows below with tiny chat icons: "会话搜索插件" and "本机外部能力选择插件".
+
+Drop placeholder — directly below card 3: an empty slot of the same width and about 260 px high, with a 2 px dashed light-blue (#007AFF at 45% opacity) rounded outline and a very faint blue tint fill, signalling where the dragged card will land. It is empty.
+
+Dragged card — the "待办" card, floating: it is lifted, overlapping partly over the placeholder and slightly offset to the right by about 12 px and up by about 30 px from the placeholder, scaled up about 3%, with a clear soft larger drop shadow (deeper than other cards, diffuse, neutral gray), fully opaque white. Its six-dot grip handle at the left of the header is visible and highlighted in blue. Header: thin outline checklist icon, bold title exactly "待办", a small blue pill exactly "今天 3", a gray plus, a gray right chevron. Body: three reminder rows with hollow gray round checkboxes and hairline separators starting at the text column: "确认待办插件设计稿" with red meta "09:30 已逾期" and a small orange flag at the right; "修复会话搜索高亮错位" with gray meta "16:30"; "整理插件 README" with gray meta "21:00". Blue plus-in-circle and blue text exactly "新提醒事项" at the bottom.
+
+Card 4 — "任务异常提醒", below the placeholder, resting, about 120 px high: outline bell icon, bold title exactly "任务异常提醒", small outlined pill "0 未读", gray text below exactly "暂无未读异常提醒".
+
+At the very bottom, centered, a small muted gray hint line exactly "拖动卡片调整顺序 · 双击把手恢复默认".
+
+Constraints: one flat front-facing screenshot-style design. All Chinese and English text exactly as specified, accurate, sharp, not garbled, not overlapping. No arrows, annotations, labels outside the UI, mouse cursor, hands, device frames, browser chrome, gradients, illustrations, watermarks or marketing copy.

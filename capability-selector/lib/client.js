@@ -17,7 +17,217 @@ window.__ModuleLoader__.load({
     const EN = {
       title: 'External capabilities', subtitle: 'Discover local capabilities for this task', search: 'Search names, purposes or sources…', all: 'All', skill: 'Skills', cli: 'CLI', mcp: 'MCP', refresh: 'Refresh', close: 'Close capability selector', loading: 'Scanning local capabilities…', empty: 'No matching capabilities', retry: 'Retry', source: 'Source', allSources: 'All sources', readyOnly: 'Installed / configured', selected: '{count} selected', clear: 'Clear', add: 'Add to composer', adding: 'Adding…', detail: 'Details', back: 'Back to capabilities', sources: 'Installation sources', instruction: 'Task usage instructions', full: 'Read full instructions', detailLoading: 'Reading instructions…', noDetail: 'Choose an item to see its instructions, sources and dependencies', installed: 'Installed', configured: 'Configured', missing: 'Not installed', disabled: 'Disabled', limited: 'Check required', unknown: 'Check required', local: 'Local', scope: 'Scans supported locations. Installation or configuration does not verify authentication or availability in this session.', warnings: '{count} scan notices', noSession: 'Open a session to select capabilities', stale: 'The active session changed. Reopen the panel before adding.', blocked: 'The composer is busy. Try again; your selection is kept.', unsupported: 'This version has no native append API. Copy the instructions instead.', copy: 'Copy instructions', copied: 'Instructions copied', duplicate: 'These instructions were already added. Change the selection to add more.', merged: '{count} sources', fingerprint: 'Content version', variants: 'Name variants', added: 'Added to the current composer', select: 'Select {name}', partial: 'Incomplete scan; expand notices for details', scanned: 'Last scanned {time}', description: 'Description', truncated: 'This long document is shown in part.', configuredHint: 'MCP is configured; connection and session tool availability have not been verified.', emptySelection: 'Select capabilities first', error: 'Request failed. Please retry.', noCopy: 'Clipboard unavailable. Copy the instructions below manually.', selectedHint: 'Selection expresses a preference for this task', cardTotal: '{count} total', cardStats: 'Skills {skills} · CLI {cli} · MCP {mcp}', cardDedup: 'Deduplicated. Choose capabilities for this task.', cardDiscovering: 'Discovering local capabilities…', cardIdle: 'Discover local capabilities', cardFailed: 'Discovery incomplete. Click to retry.',
     }
+    Object.assign(ZH, { cardsGrip: '拖动调整顺序，点按查看选项', cardsHide: '隐藏「{name}」', cardsManage: '管理卡片…', cardsTitle: '卡片管理', cardsHint: '拖动卡片标题左侧的把手调整顺序', cardsHidden: '已隐藏 {count} 张卡片', cardsReset: '恢复默认', cardsDone: '完成', cardsToggle: '显示「{name}」' })
+    Object.assign(EN, { cardsGrip: 'Drag to reorder, click for options', cardsHide: 'Hide “{name}”', cardsManage: 'Manage cards…', cardsTitle: 'Manage cards', cardsHint: 'Drag the handle left of a card title to reorder', cardsHidden: '{count} hidden cards', cardsReset: 'Restore defaults', cardsDone: 'Done', cardsToggle: 'Show “{name}”' })
     function errorText(error) { return String(error?.message ?? error ?? '') }
+
+    // ----- Generic card stack: order and visibility for every accessory card -----
+    const LAYOUT_KEY = 'dsh-capability-selector.cards.v1'
+    const idList = value => Array.isArray(value) ? [...new Set(value.filter(id => typeof id === 'string' && id && id.length <= 200))].slice(0, 200) : []
+    /** Per-browser layout; a broken or missing record falls back to the default order. */
+    function createCardLayout(storage = globalThis.localStorage) {
+      let state
+      try { const raw = JSON.parse(storage?.getItem(LAYOUT_KEY) || '{}'); state = { order: idList(raw.order), hidden: idList(raw.hidden) } } catch { state = { order: [], hidden: [] } }
+      const listeners = new Set()
+      return {
+        getSnapshot: () => state,
+        subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn) },
+        set(patch) {
+          state = { order: idList(patch.order ?? state.order), hidden: idList(patch.hidden ?? state.hidden) }
+          try { storage?.setItem(LAYOUT_KEY, JSON.stringify(state)) } catch { /* private mode: keep in memory */ }
+          for (const fn of [...listeners]) fn()
+        },
+        reset() { state = { order: [], hidden: [] }; try { storage?.removeItem(LAYOUT_KEY) } catch {} for (const fn of [...listeners]) fn() },
+      }
+    }
+    /** Insert each id missing from `order` after its nearest earlier neighbour in `reference`. */
+    function insertMissing(order, reference, keep) {
+      const out = [...order]
+      reference.forEach((id, i) => {
+        if (!keep(id) || out.includes(id)) return
+        let at = 0
+        for (let j = i - 1; j >= 0; j--) { const k = out.indexOf(reference[j]); if (k >= 0) { at = k + 1; break } }
+        out.splice(at, 0, id)
+      })
+      return out
+    }
+    /** Stored order first; newly registered cards join at their registration position. */
+    function arrangeCards(defaults, order) {
+      const present = new Set(defaults)
+      return insertMissing(idList(order).filter(id => present.has(id)), defaults, () => true)
+    }
+    function moveCard(ids, id, index) { const rest = ids.filter(value => value !== id); rest.splice(Math.max(0, Math.min(index, rest.length)), 0, id); return rest }
+    /** Write a new visible order back into the full order; hidden and absent cards keep their places. */
+    function commitOrder(all, visibleOrder, hidden, previous) {
+      const queue = [...visibleOrder]
+      const merged = all.map(id => hidden.has(id) ? id : queue.shift())
+      const present = new Set(all)
+      return insertMissing(merged, idList(previous), id => !present.has(id))
+    }
+    /** Live registrations of the accessories slot; null when the host cannot enumerate them. */
+    function slotCardSource(slots) {
+      let key, snapshot = EMPTY
+      return {
+        subscribe(fn) { try { const stop = slots?.subscribe?.(ACCESSORIES, fn); return typeof stop === 'function' ? stop : () => {} } catch { return () => {} } },
+        read() {
+          let entries
+          try { entries = slots?.entries?.(ACCESSORIES) } catch { return null }
+          if (!Array.isArray(entries)) return null
+          const seen = new Set(), rows = []
+          for (const entry of entries) {
+            const id = entry?.options?.id
+            if (typeof id !== 'string' || !id || seen.has(id) || id === NAME) continue
+            seen.add(id); rows.push({ id, order: entry.options.order ?? 0, label: entry.options.label })
+          }
+          rows.sort((a, b) => a.order - b.order)
+          const next = rows.map(row => row.id).join('\n')
+          if (next !== key) { key = next; snapshot = Object.freeze(rows) }
+          return snapshot
+        },
+      }
+    }
+    function cardLabel(row, t) {
+      if (!row) return ''
+      try { const value = typeof row.label === 'function' ? row.label() : row.label; if (typeof value === 'string' && value) return value } catch { /* fall back to the id */ }
+      return row.id === NAME ? t('title') : row.id
+    }
+    function GripIcon() {
+      return h('svg', { width: 8, height: 14, viewBox: '0 0 8 14', 'aria-hidden': true }, ...[[2, 2], [6, 2], [2, 7], [6, 7], [2, 12], [6, 12]].map(([cx, cy]) => h('circle', { key: `${cx}:${cy}`, cx, cy, r: 1.25, fill: 'currentColor' })))
+    }
+    const fill = (text, params) => String(text).replace(/\{(\w+)\}/g, (_, key) => params[key] ?? '')
+    function CardStack({ rows, layout, t, renderCard, dockRef }) {
+      const value = useStore(layout)
+      const byId = new Map(rows.map(row => [row.id, row]))
+      const all = arrangeCards(rows.map(row => row.id), value.order)
+      const hidden = new Set(value.hidden.filter(id => byId.has(id)))
+      const visible = all.filter(id => !hidden.has(id))
+      const [drag, setDrag] = React.useState(null), [menu, setMenu] = React.useState(null), [manage, setManage] = React.useState(false)
+      const items = React.useRef(new Map()), bodies = React.useRef(new Map()), active = React.useRef(null), latest = React.useRef({})
+      const shown = drag ? moveCard(visible, drag.id, drag.target) : visible
+      latest.current = { visible, shown, drag, all, hidden, order: value.order }
+      const label = id => cardLabel(byId.get(id), t)
+      const DROP_MS = 180
+      const clearLift = d => {
+        const body = bodies.current.get(d.id), item = items.current.get(d.id)
+        if (body) for (const name of ['position', 'left', 'top', 'width', 'zIndex', 'transition', 'transform', 'margin']) body.style[name] = ''
+        if (item) item.style.height = ''
+      }
+      /** The lifted card leaves the scrolling column and follows the pointer in both axes. */
+      function lift(d) {
+        const body = bodies.current.get(d.id), item = items.current.get(d.id)
+        if (!body || !item) return false
+        const rect = body.getBoundingClientRect()
+        item.style.height = `${item.getBoundingClientRect().height}px`
+        Object.assign(body.style, { position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, margin: '0', zIndex: '60', transition: 'none' })
+        // A transformed ancestor would offset fixed boxes; measure and compensate once.
+        const placed = body.getBoundingClientRect()
+        d.ox = rect.left - placed.left; d.oy = rect.top - placed.top
+        d.left = rect.left - d.startX; d.top = rect.top - d.startY
+        return true
+      }
+      function place() {
+        const d = active.current
+        const body = d?.lifted && !d.dropping && bodies.current.get(d.id)
+        if (!body) return
+        body.style.left = `${Math.round(d.x + d.left + d.ox)}px`
+        body.style.top = `${Math.round(d.y + d.top + d.oy)}px`
+        body.style.transform = 'scale(1.02)'
+      }
+      React.useLayoutEffect(() => { if (drag) place() })
+      function settle(d) { clearTimeout(d.timer); d.release?.(); clearLift(d); if (active.current === d) active.current = null; setDrag(null) }
+      function finish(commit) {
+        const d = active.current
+        if (!d || d.dropping) return d
+        d.release?.()
+        if (!d.moved) { active.current = null; return d }
+        const { visible: before, drag: current, all: full, hidden: off, order } = latest.current
+        const next = commit && current ? moveCard(before, current.id, current.target) : before
+        if (commit && next.join('\n') !== before.join('\n')) layout.set({ order: commitOrder(full, next, off, order) })
+        const body = bodies.current.get(d.id), item = items.current.get(d.id)
+        if (!commit || !body || !item || !d.lifted) { settle(d); return d }
+        // Glide into the dashed slot, then return the card to the column.
+        d.dropping = true
+        const slot = item.getBoundingClientRect()
+        body.style.transition = `left ${DROP_MS}ms ease, top ${DROP_MS}ms ease, transform ${DROP_MS}ms ease`
+        body.style.left = `${Math.round(slot.left + d.ox)}px`; body.style.top = `${Math.round(slot.top + d.oy)}px`; body.style.transform = 'none'
+        d.timer = setTimeout(() => settle(d), DROP_MS + 20)
+        return d
+      }
+      React.useEffect(() => {
+        if (!drag) return
+        const key = event => { if (event.key === 'Escape' && !active.current?.dropping) { event.preventDefault(); const d = active.current; if (d) settle(d) } }
+        window.addEventListener('keydown', key, true)
+        return () => window.removeEventListener('keydown', key, true)
+      }, [drag !== null])
+      React.useEffect(() => {
+        if (menu === null) return
+        const close = event => { if (!event.target?.closest?.('[data-dsc-card-menu], .dsc-grip')) setMenu(null) }
+        const key = event => { if (event.key === 'Escape') setMenu(null) }
+        document.addEventListener('pointerdown', close, true); window.addEventListener('keydown', key, true)
+        return () => { document.removeEventListener('pointerdown', close, true); window.removeEventListener('keydown', key, true) }
+      }, [menu])
+      React.useEffect(() => () => { const d = active.current; if (d) { clearTimeout(d.timer); d.release?.(); clearLift(d) } active.current = null }, [])
+      function onMove(event) {
+        const d = active.current
+        if (!d || d.pointer !== event.pointerId || d.dropping) return
+        d.x = event.clientX; d.y = event.clientY
+        if (!d.moved) {
+          if (Math.hypot(d.x - d.startX, d.y - d.startY) < 4) return
+          d.moved = true; setMenu(null); setManage(false)
+          d.lifted = lift(d)
+          setDrag({ id: d.id, target: latest.current.visible.indexOf(d.id) })
+        }
+        event.preventDefault()
+        const dock = dockRef?.current
+        if (dock) { const r = dock.getBoundingClientRect(); if (d.y < r.top + 28) dock.scrollTop -= 12; else if (d.y > r.bottom - 28) dock.scrollTop += 12 }
+        place()
+        const center = d.y - d.grab + d.height / 2
+        let target = 0
+        for (const other of latest.current.shown) {
+          if (other === d.id) continue
+          const rect = items.current.get(other)?.getBoundingClientRect()
+          if (rect && rect.top + rect.height / 2 < center) target++
+        }
+        if (latest.current.drag?.target !== target) setDrag({ id: d.id, target })
+      }
+      const grip = id => ({
+        onPointerDown(event) {
+          if (event.button !== 0 || event.isPrimary === false || active.current) return
+          const item = items.current.get(id)
+          if (!item) return
+          const rect = item.getBoundingClientRect()
+          const d = { id, pointer: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, grab: event.clientY - rect.top, height: rect.height, moved: false, lifted: false, ox: 0, oy: 0 }
+          // Window listeners: reordering moves DOM nodes, which would drop element pointer capture.
+          const up = next => { if (next.pointerId !== d.pointer) return; const done = finish(true); if (done && !done.moved) setMenu(current => current === id ? null : id) }
+          const cancel = next => { if (next.pointerId === undefined || next.pointerId === d.pointer) finish(false) }
+          const blur = () => finish(false)
+          window.addEventListener('pointermove', onMove, true); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', cancel, true); window.addEventListener('blur', blur)
+          d.release = () => { d.release = undefined; window.removeEventListener('pointermove', onMove, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', cancel, true); window.removeEventListener('blur', blur) }
+          active.current = d
+          event.preventDefault()
+        },
+        onKeyDown(event) { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setMenu(current => current === id ? null : id) } },
+      })
+      return h(React.Fragment, null,
+        ...shown.map(id => h('div', { key: id, ref: element => { if (element) items.current.set(id, element); else items.current.delete(id) }, className: 'dsc-card-item', 'data-dsc-card': id, 'data-dragging': drag?.id === id },
+          h('div', { className: 'dsc-card-body', ref: element => { if (element) bodies.current.set(id, element); else bodies.current.delete(id) } },
+            h('button', { type: 'button', className: 'dsc-grip', 'aria-label': `${label(id)} · ${t('cardsGrip')}`, title: t('cardsGrip'), 'aria-haspopup': 'menu', 'aria-expanded': menu === id, ...grip(id) }, h(GripIcon)),
+            menu === id ? h('div', { className: 'dsc-card-menu', role: 'menu', 'data-dsc-card-menu': '' },
+              h('button', { type: 'button', role: 'menuitem', onClick: () => { setMenu(null); layout.set({ hidden: [...value.hidden, id] }) } }, fill(t('cardsHide'), { name: label(id) })),
+              h('button', { type: 'button', role: 'menuitem', onClick: () => { setMenu(null); setManage(true) } }, t('cardsManage'))) : null,
+            h('div', { className: 'dsc-card-content' }, renderCard(id))))),
+        manage ? h('section', { className: 'dsc-manage', 'aria-label': t('cardsTitle') },
+          h('div', { className: 'dsc-manage-head' }, t('cardsTitle')),
+          h('p', { className: 'dsc-manage-hint' }, t('cardsHint')),
+          h('ul', null, ...all.map(id => h('li', { key: id },
+            h('span', null, label(id)),
+            h('button', { type: 'button', role: 'switch', className: 'dsc-switch', 'aria-checked': !hidden.has(id), 'aria-label': fill(t('cardsToggle'), { name: label(id) }),
+              onClick: () => layout.set({ hidden: hidden.has(id) ? value.hidden.filter(other => other !== id) : [...value.hidden, id] }) })))),
+          h('div', { className: 'dsc-manage-actions' },
+            h('button', { type: 'button', className: 'dsc-plain', onClick: () => layout.reset() }, t('cardsReset')),
+            h('button', { type: 'button', className: 'dsc-plain dsc-manage-done', onClick: () => setManage(false) }, t('cardsDone'))))
+          : hidden.size ? h('button', { type: 'button', className: 'dsc-cards-hidden', onClick: () => setManage(true) }, fill(t('cardsHidden'), { count: hidden.size }), ' · ', t('cardsManage').replace(/…$/, '')) : null)
+    }
     function createStore(initial) {
       let state = initial
       const listeners = new Set()
@@ -127,6 +337,17 @@ window.__ModuleLoader__.load({
 .dsc-panel-body{display:grid;grid-template-columns:minmax(0,1fr) 290px;flex:1;min-height:0}.dsc-list{overflow:auto;overscroll-behavior:contain;min-height:0;padding:8px 10px;scrollbar-gutter:stable}.dsc-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;min-height:59px;min-width:0}.dsc-row[data-active=true]{background:var(--dsc-hover)}.dsc-row input{flex:none;width:16px;height:16px;margin:0}.dsc-entry{border:0;background:transparent;display:flex;gap:9px;align-items:center;min-width:0;flex:1;padding:3px 0;text-align:left;color:var(--dsc-text)}.dsc-kind-icon{width:29px;height:29px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex:none;font-size:11px;color:#8b70c2;background:#9474c214}.dsc-kind-icon[data-kind=cli]{color:#529780;background:#52978014}.dsc-kind-icon[data-kind=mcp]{color:#658ec2;background:#658ec214}.dsc-entry-text{display:block;min-width:0;flex:1;overflow:hidden}.dsc-entry-name{display:flex;gap:6px;align-items:center;min-width:0;overflow:hidden;font-weight:500}.dsc-entry-name>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsc-merged{font-size:10px;color:var(--dsc-muted);font-weight:400;flex:none}.dsc-entry-description{display:block;max-width:100%;color:var(--dsc-muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}.dsc-row-meta{text-align:right;flex:none;min-width:0;overflow:hidden;font-size:10px;max-width:88px;color:var(--dsc-muted)}.dsc-row-meta .dsc-status{overflow:hidden;text-overflow:ellipsis}.dsc-status{display:block;white-space:nowrap}.dsc-status[data-status=installed]{color:#5b9b7e}.dsc-status[data-status=configured]{color:#688cc3}.dsc-status[data-status=limited]{color:#b08d4e}.dsc-row-source{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px;max-width:88px}
 .dsc-detail{border-left:1px solid var(--dsc-border);padding:16px;overflow:auto;overscroll-behavior:contain;min-width:0;background:var(--dsc-hover)}.dsc-detail h3{margin:8px 0;font-size:19px;overflow-wrap:anywhere}.dsc-detail h4{font-size:12px;margin:18px 0 7px;font-weight:600}.dsc-detail p{color:var(--dsc-muted);margin:6px 0;overflow-wrap:anywhere}.dsc-source-item{padding:7px 0;border-bottom:1px solid var(--dsc-border)}.dsc-source-item strong{font-size:11px;font-weight:500}.dsc-source-item code{font:10px/1.5 ui-monospace,monospace;display:block;overflow-wrap:anywhere;white-space:pre-wrap;color:var(--dsc-muted);margin-top:3px}.dsc-content{font:11px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0;user-select:text}.dsc-task-text{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--dsc-muted);user-select:text}.dsc-mobile-back{display:none}.dsc-empty{padding:28px 16px;text-align:center;color:var(--dsc-muted);font-size:12px}
 .dsc-feedback{padding:8px 16px;border-top:1px solid var(--dsc-border);font-size:11px;flex:none;max-height:90px;overflow:auto;overflow-wrap:anywhere;color:var(--dsc-muted)}.dsc-feedback[role=alert]{color:#b18554}.dsc-warnings{margin:0;font-size:11px;color:var(--dsc-muted)}.dsc-warnings summary{cursor:pointer}.dsc-warnings ul{margin:6px 0;padding-left:20px}.dsc-footer{border-top:1px solid var(--dsc-border);padding:10px 16px;flex:none;display:flex;align-items:center;gap:10px;min-width:0}.dsc-selection{flex:1;min-width:0}.dsc-selection-head{display:flex;gap:10px;align-items:center;white-space:nowrap}.dsc-selection-head button{font-size:11px;padding:1px 4px}.dsc-chips{display:flex;gap:4px;overflow:auto;margin-top:5px;max-height:30px}.dsc-chip{border:0;border-radius:6px;padding:2px 6px;background:var(--dsc-hover);color:var(--dsc-muted);font-size:10px!important;white-space:nowrap;flex:none;max-width:180px;overflow:hidden;text-overflow:ellipsis}.dsc-add{border:0;border-radius:8px;background:var(--dsc-accent);color:#fff;padding:9px 14px;font-weight:500;flex:none}.dsc-footnote{font-size:10px;color:var(--dsc-muted);padding:0 16px 9px;flex:none}.dsc-backdrop{position:fixed;inset:0;z-index:49;background:#00000020;pointer-events:auto}.dsc-dock-notice{position:static;flex:none;max-width:100%;padding:7px 10px;border-radius:8px;background:var(--dsc-surface);box-shadow:0 3px 15px #00000014;font-size:11px;color:var(--dsc-muted)}
+.dsc-card-item{position:relative;flex:none;min-width:0;border-radius:var(--dsw-radius-xl,16px)}.dsc-card-item:has(>.dsc-card-body>.dsc-card-content:empty){display:none}
+.dsc-card-item[data-dragging=true]{background:color-mix(in srgb,#007AFF 5%,transparent);outline:2px dashed color-mix(in srgb,#007AFF 45%,transparent);outline-offset:-2px}
+.dsc-card-body{position:relative;border-radius:inherit;transform-origin:50% 30%}.dsc-card-item[data-dragging=true]>.dsc-card-body{box-shadow:0 16px 36px #0000002e;border-radius:var(--dsw-radius-xl,16px);pointer-events:none}
+.dsc-card-item .dsc-controls{position:static}.dsc-card-content{min-width:0}
+.dsc-grip{position:absolute;z-index:6;left:1px;top:9px;width:10px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary,var(--dsc-muted));display:flex;align-items:center;justify-content:center;opacity:0;cursor:grab!important;touch-action:none;transition:opacity .12s}
+.dsc-card-item:hover>.dsc-card-body>.dsc-grip,.dsc-grip:focus-visible,.dsc-grip[aria-expanded=true]{opacity:1}.dsc-grip:hover{color:var(--dsc-text);background:var(--dsc-hover)}.dsc-card-item[data-dragging=true] .dsc-grip{opacity:1;color:#007AFF;cursor:grabbing!important;pointer-events:auto}
+.dsc-card-menu{position:absolute;z-index:7;left:16px;top:8px;min-width:150px;padding:4px;border:1px solid var(--dsc-border);border-radius:10px;background:var(--dsc-surface);box-shadow:0 8px 28px #00000024;display:flex;flex-direction:column}.dsc-card-menu button{border:0;background:transparent;color:var(--dsc-text);text-align:left;padding:6px 9px;border-radius:7px;white-space:nowrap}.dsc-card-menu button:hover{background:var(--dsc-hover)}
+.dsc-manage{flex:none;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l3,var(--dsc-border));border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-alias-bg-layer-1,var(--dsc-bg))}.dsc-manage-head{font-weight:600}.dsc-manage-hint{margin:2px 0 6px;font-size:11px;color:var(--dsc-muted)}.dsc-manage ul{list-style:none;margin:0;padding:0}.dsc-manage li{display:flex;align-items:center;gap:8px;min-height:34px;border-top:1px solid var(--dsc-border)}.dsc-manage li:first-child{border-top:0}.dsc-manage li>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsc-manage-actions{display:flex;justify-content:space-between;margin-top:6px}.dsc-manage-done{color:#007AFF!important}
+.dsc-switch{position:relative;flex:none;width:34px;height:20px;border:0;border-radius:10px;padding:0;background:var(--dsw-alias-bg-layer-3,#d1d1d6)}.dsc-switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #00000033;transition:left .15s}.dsc-switch[aria-checked=true]{background:#34C759}.dsc-switch[aria-checked=true]::after{left:16px}
+.dsc-cards-hidden{flex:none;align-self:center;border:0;background:transparent;color:var(--dsc-muted);font-size:11px!important;padding:2px 8px;border-radius:6px}.dsc-cards-hidden:hover{color:var(--dsc-text);background:var(--dsc-hover)}
+@media(prefers-reduced-motion:reduce){.dsc-card-body,.dsc-grip,.dsc-switch::after{transition:none}}
 @media(max-width:759px){.dsc-panel-body{grid-template-columns:minmax(0,1fr)}.dsc-detail{display:none;border-left:0}.dsc-panel[data-detail=true] .dsc-list{display:none}.dsc-panel[data-detail=true] .dsc-detail{display:block}.dsc-mobile-back{display:inline-flex}.dsc-subtitle{display:none}.dsc-head{padding:12px 12px 9px}.dsc-search-wrap{padding:0 12px 9px}.dsc-toolbar{padding:0 12px 9px;gap:5px}.dsc-tabs{min-width:100%;flex:none}.dsc-tab{padding:4px 8px}.dsc-footer{padding:9px 12px;gap:6px}.dsc-add{padding:8px 10px}.dsc-copy{display:none}.dsc-footnote{padding:0 12px 7px}.dsc-row-source{max-width:72px}.dsc-source-select{max-width:155px}.dsc-controls{gap:5px}}
 @media(max-height:480px){.dsc-head{padding:6px 12px}.dsc-head-icon,.dsc-subtitle,.dsc-footnote,.dsc-chips,.dsc-ready{display:none}.dsc-heading h2{font-size:15px}.dsc-search-wrap{padding:0 12px 5px}.dsc-search{height:30px}.dsc-toolbar{padding:0 12px 5px;gap:3px}.dsc-tabs{min-width:0}.dsc-source-select{display:none}.dsc-footer{padding:5px 12px}.dsc-add{padding:5px 10px}.dsc-feedback{max-height:45px;padding:4px 12px}}
 @media(max-height:360px){.dsc-trigger{padding:6px 10px}.dsc-card-hint{display:none}.dsc-card-stats{margin-top:3px}}
@@ -184,16 +405,20 @@ window.__ModuleLoader__.load({
         function measure() {
           if (stopped) return
           const found = document.getElementById('dsh-session-summary-card')
-          const summary = found?.getAttribute('data-dsh-session-summary') === sessionId && found.getClientRects().length ? found : null
-          const header = anchors.get(sessionId)?.closest?.('header')
           const ownDock = dockRef.current
+          const mine = found?.getAttribute('data-dsh-session-summary') === sessionId && found.getClientRects().length
+          // A summary seated in this stack is a member, not the anchor above it.
+          const docked = Boolean(mine && typeof ownDock?.contains === "function" && ownDock.contains(found))
+          const summary = mine && !docked ? found : null
+          const header = anchors.get(sessionId)?.closest?.('header')
+          const toggleOpen = Boolean(header?.querySelector?.('[data-dsh-session-summary-toggle] [aria-expanded="true"]'))
           if (summary !== summaryElement || header !== headerElement || ownDock !== dockElement) {
             resizeObserver?.disconnect(); summaryObserver?.disconnect(); summaryElement = summary; headerElement = header; dockElement = ownDock
             if (summary) { resizeObserver?.observe(summary); summaryObserver?.observe(summary, { attributes: true, attributeFilter: ['style', 'data-layout'] }) }
-            if (header) resizeObserver?.observe(header)
+            if (header) { resizeObserver?.observe(header); summaryObserver?.observe(header, { subtree: true, attributes: true, attributeFilter: ['aria-expanded'] }) }
             if (ownDock) resizeObserver?.observe(ownDock)
           }
-          if (dockHidden(sidebarOpen, summary)) {
+          if (dockHidden(sidebarOpen, summary || docked || toggleOpen)) {
             // Hidden docks reserve nothing; the body observer still sees a revealed summary.
             releaseReserve()
             setGeometry(old => old?.hidden ? old : { hidden: true })
@@ -307,8 +532,10 @@ window.__ModuleLoader__.load({
           state.selectedIds.length ? h('span', { className: 'dsc-selected-count' }, ' · ', t('selected', { count: state.selectedIds.length })) : null))
     }
     const CLOSED_SIDEBAR = Object.freeze({ subscribe: () => () => {}, read: () => false })
-    function CapabilityOverlay({ api, anchors, uiSession, sessions, t, renderSlot = () => null, sidebar = CLOSED_SIDEBAR }) {
+    const NO_CARDS = Object.freeze({ subscribe: () => () => {}, read: () => null })
+    function CapabilityOverlay({ api, anchors, uiSession, sessions, t, renderSlot = () => null, sidebar = CLOSED_SIDEBAR, cardSource = NO_CARDS, cardLayout }) {
       const active = useStore(uiSession.current), state = useStore(api)
+      const slotRows = React.useSyncExternalStore(cardSource.subscribe, cardSource.read, cardSource.read)
       const sessionId = active?.key
       React.useLayoutEffect(() => { api.setSession(sessionId, sessionId ? sessions.binding(sessionId) : undefined) }, [api, sessions, sessionId, active?.ctx])
       React.useEffect(() => {
@@ -324,10 +551,14 @@ window.__ModuleLoader__.load({
       // A panel left open would otherwise pop back when the sidebar closes.
       React.useEffect(() => { if (hidden && state.open) api.close() }, [api, hidden, state.open])
       if (!sessionId || !geometry || hidden) return null
+      const card = h('div', { className: 'dsc-controls' }, h(CapabilityCard, { api, state, t, triggerRef }))
+      // Hosts that cannot enumerate the slot keep the fixed order.
+      const stack = slotRows && cardLayout
+        ? h(CardStack, { rows: [{ id: NAME, order: 0, label: () => t('title') }, ...slotRows].sort((a, b) => a.order - b.order), layout: cardLayout, t, dockRef, renderCard: id => id === NAME ? card : renderSlot(ACCESSORIES, { sessionId }, { only: id }) })
+        : h(React.Fragment, null, card, h('div', { className: 'dsc-accessories' }, renderSlot(ACCESSORIES, { sessionId })))
       return h('div', { className: 'dsc-root', 'data-dsh-capability-selector': '' },
         h('div', { ref: dockRef, className: 'dsc-dock', style: dockStyle },
-          h('div', { className: 'dsc-controls' }, h(CapabilityCard, { api, state, t, triggerRef })),
-          h('div', { className: 'dsc-accessories' }, renderSlot(ACCESSORIES, { sessionId })),
+          stack,
           !state.open && state.notice ? h('div', { className: 'dsc-dock-notice', role: 'status' }, state.notice) : null),
         state.open && state.sessionId === sessionId ? h(CapabilityPanel, { key: sessionId, api, state, t, placement: geometry.panel, triggerRef }) : null)
     }
@@ -342,9 +573,10 @@ window.__ModuleLoader__.load({
       // Optional service: read lazily so plugin load order never matters.
       const sidebarRight = () => { try { return ctx.get?.('sidebarRight') } catch { return undefined } }
       const sidebar = { read: () => rightSidebarExpanded(sidebarRight(), globalThis.document), subscribe: listener => watchRightSidebar(sidebarRight(), listener, globalThis.document) }
+      const cardSource = slotCardSource(ctx.slots), cardLayout = createCardLayout()
       ctx.effect(() => ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({ name: 'conversation.session.header.utilities', id: `${NAME}.anchor`, order: 110, locale: NS, label, inject: () => ({ anchors }) }, CapabilityAnchor)))
-      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: `${NAME}.overlay`, order: 50, locale: NS, label, children: { [ACCESSORIES]: { kind: 'list', scope: 'root' } }, inject: () => ({ api, anchors, uiSession: ctx.uiSession, sessions: ctx.sessions, sidebar }) }, CapabilityOverlay)))
+      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: `${NAME}.overlay`, order: 50, locale: NS, label, children: { [ACCESSORIES]: { kind: 'list', scope: 'root' } }, inject: () => ({ api, anchors, uiSession: ctx.uiSession, sessions: ctx.sessions, sidebar, cardSource, cardLayout }) }, CapabilityOverlay)))
     }
-    return { name: NAME, inject: ['slots', 'locale', 'uiSession', 'sessions', 'conversation'], apply, createController, createStore, dockPlacement, useDockGeometry, rightSidebarExpanded, watchRightSidebar, dockHidden, ACCESSORIES, panelPlacement, filterItems, buildSelectionText, requestJSON, CSS, ZH, EN, CapabilityPanel, CapabilityCard, CapabilityOverlay, CapabilityAnchor, Details }
+    return { name: NAME, inject: ['slots', 'locale', 'uiSession', 'sessions', 'conversation'], apply, createController, createStore, createCardLayout, arrangeCards, moveCard, commitOrder, slotCardSource, cardLabel, CardStack, LAYOUT_KEY, dockPlacement, useDockGeometry, rightSidebarExpanded, watchRightSidebar, dockHidden, ACCESSORIES, panelPlacement, filterItems, buildSelectionText, requestJSON, CSS, ZH, EN, CapabilityPanel, CapabilityCard, CapabilityOverlay, CapabilityAnchor, Details }
   },
 })

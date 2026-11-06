@@ -172,7 +172,7 @@ test('native renderSlot receives the selected session below controls and fixture
   const args = { api, anchors: new Map(), uiSession: { current: c.createStore({ key: 's' }) }, sessions: {}, t: key => key };
   const calls = [];
   const tree = c.CapabilityOverlay({ ...args, renderSlot: (name, props) => { calls.push({ name, props }); return 'companion'; } });
-  const dock = tree.props.children[0], controls = dock.props.children[0], accessories = dock.props.children[1];
+  const dock = tree.props.children[0], stack = dock.props.children[0], controls = stack.props.children[0], accessories = stack.props.children[1];
   assert.equal(controls.props.className, 'dsc-controls');
   assert.equal(controls.props.children[0].type, c.CapabilityCard);
   assert.equal(accessories.props.className, 'dsc-accessories');
@@ -181,7 +181,7 @@ test('native renderSlot receives the selected session below controls and fixture
   assert.equal(dock.props.style.height, 'auto', 'natural child changes remain observable');
   assert.equal(dock.props.style.maxHeight, 500, 'the owner constrains its own scrollable column');
   const bare = c.CapabilityOverlay(args);
-  assert.equal(bare.props.children[0].props.children[1].props.children[0], null);
+  assert.equal(bare.props.children[0].props.children[0].props.children[1].props.children[0], null, 'without slot enumeration the fixed order remains');
   api.dispose();
 });
 

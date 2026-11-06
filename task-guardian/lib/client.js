@@ -185,7 +185,7 @@ window.__ModuleLoader__.load({
       const fetchImpl = transport?.fetch ? transport.fetch.bind(transport) : (...args) => globalThis.fetch(...args);
       const store = createAlertStore((action, payload, signal) => requestJSON(fetchImpl, action, payload, signal));
       ctx.effect(() => () => store.dispose());
-      ctx.slots.inject(ACCESSORY, () => ctx.slots.register({ name: ACCESSORY, id: ID, order: 100, locale: NS,
+      ctx.slots.inject(ACCESSORY, () => ctx.slots.register({ name: ACCESSORY, id: ID, order: 100, locale: NS, label: () => ctx.locale.bind(NS)('title'),
         inject: () => ({ store, open: sessionId => ctx.uiWorkspace.openSession(sessionId) }) }, TaskAlertsCard));
     }
     return { apply, inject, TaskAlertsCard, AlertContent, createAlertStore, alertStatusText, NoticeBell, ZH, EN, CSS, requestJSON };

@@ -1,0 +1,12 @@
+{
+  "model": "gpt-image-2.5-sunburst",
+  "quality": "high",
+  "size": "1024x1536",
+  "n": 1,
+  "output_format": "png",
+  "promptFile": "/Users/minyuwei.6666/dsh-plugin/card-order-design/drag-gpt-image-2.5-prompt.txt",
+  "imagePath": "/Users/minyuwei.6666/dsh-plugin/card-order-design/drag-gpt-image-2.5-high-v1.png",
+  "bytes": 1229782,
+  "requestId": "3422ad05-ffc8-4adb-9f23-4802ceee33aa",
+  "createdAt": "2026-11-06T06:34:50.178Z"
+}
