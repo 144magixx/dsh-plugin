@@ -13,17 +13,17 @@ function memoryStorage(initial = {}) {
   return { getItem: key => (map.has(key) ? map.get(key) : null), setItem: (key, value) => { map.set(key, String(value)); }, map };
 }
 
-test('window defaults replace old saved UI state while only position persists', () => {
-  const storage = memoryStorage({ [STORAGE_KEY]: JSON.stringify({ pinned: true, collapsed: { sources: true, bogus: true, jobs: false }, extra: 1 }) });
+test('window defaults replace old saved UI state, including a legacy dragged position', () => {
+  const storage = memoryStorage({ [STORAGE_KEY]: JSON.stringify({ pinned: true, collapsed: { sources: true, bogus: true, jobs: false }, position: { left: 9, top: 9 }, extra: 1 }) });
   const { prefs } = harness({}, storage).api;
-  assert.deepEqual(plain(prefs.getSnapshot()), { pinned: true, collapsed: defaultCollapsed, floating: false, position: null });
+  assert.deepEqual(plain(prefs.getSnapshot()), { pinned: true, collapsed: defaultCollapsed });
   let notified = 0;
   prefs.subscribe(() => { notified++; });
   prefs.set({ pinned: true });
   assert.equal(notified, 0, 'unchanged values do not notify');
   prefs.set({ pinned: false });
   assert.equal(notified, 1);
-  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)), { position: null });
+  assert.deepEqual(JSON.parse(storage.map.get(STORAGE_KEY)), {});
   const broken = createStore(sanitizePrefs({}), { storage: memoryStorage({ [STORAGE_KEY]: '{not json' }), key: STORAGE_KEY, sanitize: sanitizePrefs });
   assert.equal(broken.getSnapshot().pinned, true);
   const failing = createStore({ a: 1 }, { storage: { getItem: () => null, setItem: () => { throw new Error('quota'); } }, key: 'k' });
@@ -201,19 +201,17 @@ test('each new window opens pinned with only changes expanded even after closing
   assert.equal(harness({}, storage).api.prefs.getSnapshot().pinned, true, 'pinning is remembered on reload');
 });
 
-test('drag positions persist independently of pin state and reject invalid coordinates', () => {
-  const storage = memoryStorage();
-  const { api } = harness({}, storage);
-  api.setPosition({ left: 123.5, top: 80 });
-  assert.deepEqual(plain(harness({}, storage).api.prefs.getSnapshot().position), { left: 123.5, top: 80 });
-  assert.equal(api.prefs.getSnapshot().pinned, true);
-  api.close();
-  assert.deepEqual(plain(api.prefs.getSnapshot().position), { left: 123.5, top: 80 });
-  api.setPosition(null);
-  assert.equal(harness({}, storage).api.prefs.getSnapshot().position, null);
-  for (const position of [{ left: NaN, top: 1 }, { left: 1, top: Infinity }, { left: '3', top: 4 }, [], null]) {
-    assert.equal(sanitizePrefs({ position }).position, null);
-  }
+test('the card stack seat claims rendering per Session and releases it on unmount', () => {
+  const { api } = harness({}, memoryStorage());
+  assert.equal(typeof api.setPosition, 'undefined', 'free dragging is gone; order comes from the shared card stack');
+  api.ui.set({ cardHeight: 300 });
+  const first = api.dock('s1'), second = api.dock('s1');
+  assert.equal(api.ui.getSnapshot().docked, 's1');
+  assert.equal(api.ui.getSnapshot().cardHeight, 0, 'the stack reserves space for a seated card');
+  first();
+  assert.equal(api.ui.getSnapshot().docked, 's1', 'still seated while another seat is mounted');
+  second();
+  assert.equal(api.ui.getSnapshot().docked, null, 'the fixed overlay returns when no stack seats the card');
 });
 
 test('card placement keeps dragged, anchored and resized cards inside the viewport', () => {
@@ -297,13 +295,6 @@ test('default layout reserves a side column or a narrow-window summary row', () 
   assert.ok(stack.width <= 760 - 24);
   assert.ok(stack.maxHeight <= viewport.height * 0.45);
   assert.equal(summaryLayout({ width: 1200, right: 1440, bottom: 76 }, viewport, true).layout, 'floating');
-  const storage = memoryStorage();
-  const { api } = harness({}, storage);
-  api.setPosition({ left: 500, top: 150 });
-  assert.equal(api.prefs.getSnapshot().floating, true, 'manual drag detaches the card in this window');
-  assert.equal(harness({}, storage).api.prefs.getSnapshot().floating, false, 'a new window always starts docked');
-  api.setPosition(null);
-  assert.equal(api.prefs.getSnapshot().floating, false, 'reset docks the card again');
 });
 
 function fakeDocument(panels = []) {

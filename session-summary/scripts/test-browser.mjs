@@ -94,16 +94,6 @@ try {
     await mouse('mouseReleased', x, y, { button: 'left', clickCount: 1 });
     await settle();
   }
-  async function drag(dx, dy, end = true) {
-    const rect = await box('[data-dss-drag-handle]');
-    const x = rect.left + 35, y = rect.top + rect.height / 2;
-    await mouse('mouseMoved', x, y);
-    await mouse('mousePressed', x, y, { button: 'left', buttons: 1 });
-    for (let step = 1; step <= 5; step++) await mouse('mouseMoved', x + dx * step / 5, y + dy * step / 5, { buttons: 1 });
-    if (end) await mouse('mouseReleased', x + dx, y + dy, { button: 'left' });
-    await settle();
-    return { x: x + dx, y: y + dy };
-  }
   const expandedSections = () => evaluate(`[...document.querySelectorAll('.dss-sec-head[aria-expanded=true]')].map(button => button.closest('[data-section]').dataset.section)`);
   const checkBackground = async theme => {
     const result = await evaluate(`(() => {
@@ -139,67 +129,17 @@ try {
   const narrowShot = await call('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(workspace, 'tests/.integration-data/preview/card-narrow.png'), Buffer.from(narrowShot.data, 'base64'));
   await resize(1200, 900);
-  await drag(-220, 90);
-  const moved = await box();
-  check('real mouse drag follows pointer', Math.abs(moved.left - initial.left + 220) < 2 && Math.abs(moved.top - initial.top - 90) < 2);
-  check('drag saves position and preserves pin', (await prefs()).pinned && Math.abs((await prefs()).position.left - moved.left) < 2);
-  const screenshot = await call('Page.captureScreenshot', { format: 'png' });
-  fs.writeFileSync(path.join(workspace, 'tests/.integration-data/preview/card-dragged.png'), Buffer.from(screenshot.data, 'base64'));
-  const saved = (await prefs()).position;
-  await call('Page.reload'); await waitFor('!!window.__summaryPreview && !!document.querySelector("[data-dsh-session-summary]")'); await settle();
-  check('reload returns to a safe docked layout', (await prefs()).pinned && !(await prefs()).floating && Math.abs((await box()).left - initial.left) < 2);
-  await evaluate(`${api}.setPosition(${JSON.stringify(saved)})`); await settle();
+  check('free dragging is removed; the stack owns ordering', await evaluate(`!document.querySelector('[data-dss-drag-handle]') && !${api}.setPosition`) && Math.abs((await box()).left - initial.left) < 2);
   await evaluate('window.__summaryPreview.switchSession("sess-other")'); await settle();
-  check('switching session keeps position and replaces old content', Math.abs((await box()).left - saved.left) < 2 && await evaluate(`${card}.dataset.dshSessionSummary === 'sess-other' && !${card}.textContent.includes('Wikipedia')`));
+  check('switching session keeps the anchor and replaces old content', Math.abs((await box()).left - initial.left) < 2 && await evaluate(`${card}.dataset.dshSessionSummary === 'sess-other' && !${card}.textContent.includes('Wikipedia')`));
   await evaluate('window.__summaryPreview.switchSession("sess-paper")'); await settle();
   await resize(280, 190);
   const small = await box();
   check('small viewport keeps entire card reachable', small.left >= 11 && small.top >= 11 && small.right <= 269 && small.bottom <= 179);
   await resize(1200, 900);
   await click('[data-dss-more]');
-  await evaluate(`[...document.querySelectorAll('.dss-menu button')].find(button => button.textContent.includes('靠边显示')).click()`); await settle();
-  check('reset menu returns to header anchor', (await prefs()).position === null && Math.abs((await box()).left - initial.left) < 2);
-  await evaluate("document.querySelector('.pv-overlay').style.transform = 'translate(37px, 21px)'; window.dispatchEvent(new Event('resize'))");
-  // Changing the anchor forces a layout pass under the shifted containing block.
-  await resize(1190, 900); await resize(1200, 900);
-  await drag(-150, 40);
-  const shifted = await box();
-  check('drag works inside transformed overlay', Math.abs(shifted.left - initial.left + 150) < 2 && Math.abs(shifted.top - initial.top - 40) < 2);
-  await evaluate("document.querySelector('.pv-overlay').style.transform = 'translate(71px, 49px)'; window.dispatchEvent(new Event('resize'))"); await settle();
-  check('saved position survives later overlay movement', Math.abs((await box()).left - shifted.left) < 2 && Math.abs((await box()).top - shifted.top) < 2);
-  await click('[data-dss-drag-handle]');
-  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft' });
-  await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft' }); await settle();
-  check('keyboard moves focused title by 16px', Math.abs((await box()).left - shifted.left + 16) < 2);
-  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Home', code: 'Home' }); await settle();
-  check('Home restores anchored position', (await prefs()).position === null);
-  const beforeRight = await box('[data-dss-drag-handle]');
-  await mouse('mousePressed', beforeRight.left + 30, beforeRight.top + 10, { button: 'right', buttons: 2 });
-  await mouse('mouseMoved', beforeRight.left - 80, beforeRight.top + 50, { buttons: 2 });
-  await mouse('mouseReleased', beforeRight.left - 80, beforeRight.top + 50, { button: 'right' }); await settle();
-  check('right button does not drag', (await prefs()).position === null);
-  await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape' });
-  // A native context menu may consume Escape, or the card may close. Restore explicitly.
-  await evaluate(`${api}.prefs.set({pinned:true})`); await settle();
-  await call('Emulation.setTouchEmulationEnabled', { enabled: true });
-  const touch = await box('[data-dss-drag-handle]');
-  const point = { x: touch.left + 40, y: touch.top + 12, id: 1 };
-  await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
-  await call('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...point, x: point.x - 100, y: point.y + 30 }] });
-  await call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await settle();
-  check('touch drag persists position', (await prefs()).position !== null);
-  const beforeCancel = (await prefs()).position;
-  const touch2 = await box('[data-dss-drag-handle]');
-  const p2 = { x: touch2.left + 40, y: touch2.top + 12, id: 2 };
-  await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [p2] });
-  await call('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...p2, x: p2.x - 40, y: p2.y + 20 }] });
-  await call('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }); await settle();
-  check('touch cancellation restores saved position', JSON.stringify((await prefs()).position) === JSON.stringify(beforeCancel));
-  await call('Emulation.setTouchEmulationEnabled', { enabled: false });
-  const pointer = await drag(-80, 25, false);
-  await evaluate('window.__summaryPreview.switchSession("sess-other")'); await settle();
-  await mouse('mouseReleased', pointer.x, pointer.y, { button: 'left' }); await settle();
-  check('switching during drag cleans up pointer listeners', JSON.stringify((await prefs()).position) === JSON.stringify(beforeCancel));
+  check('menu no longer offers a position reset', await evaluate(`![...document.querySelectorAll('.dss-menu button')].some(button => button.textContent.includes('靠边显示'))`));
+  await click('[data-dss-more]');
   await click('[data-dss-pin]');
   check('pin button unpins without dragging or closing', !(await prefs()).pinned && await evaluate(`!!${card}`));
   await evaluate(`${api}.toggleSection('sources'); ${api}.toggleSection('changes')`); await settle();
@@ -208,10 +148,9 @@ try {
   check('manual close works for the current window', !(await prefs()).pinned && await evaluate(`!${card}`));
   await call('Page.reload'); await waitFor('!!window.__summaryPreview && !!document.querySelector("[data-dsh-session-summary]")'); await settle();
   check('reload reopens pinned and resets section defaults', (await prefs()).pinned && JSON.stringify(await expandedSections()) === '["changes"]');
-  check('window reset retains dragged position', JSON.stringify((await prefs()).position) === JSON.stringify(beforeCancel));
   await evaluate(`localStorage.setItem(window.__summaryPreview.client.STORAGE_KEY, JSON.stringify({pinned:false,collapsed:{changes:true},position:{left:100,top:70}}))`);
   await call('Page.reload'); await waitFor('!!window.__summaryPreview && !!document.querySelector("[data-dsh-session-summary]")'); await settle();
-  check('legacy saved close cannot suppress startup', (await prefs()).pinned && (await prefs()).position.left === 100 && JSON.stringify(await expandedSections()) === '["changes"]');
+  check('legacy saved close and position cannot suppress startup', (await prefs()).pinned && (await prefs()).position === undefined && Math.abs((await box()).left - initial.left) < 2 && JSON.stringify(await expandedSections()) === '["changes"]');
   await click('[data-dss-close]');
   const second = await send('Target.createTarget', { url: `${page}?persist=yes&tip=no`, newWindow: true });
   const attached = await send('Target.attachToTarget', { targetId: second.targetId, flatten: true });

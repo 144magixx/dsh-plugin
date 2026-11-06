@@ -23,6 +23,7 @@ window.__ModuleLoader__.load({
     const NS = 'session-summary'
     const SLOT = 'conversation.session.header.utilities'
     const OVERLAY_SLOT = 'shell.overlay'
+    const ACCESSORY_SLOT = 'capability-selector.accessories'
     const OVERLAY_ID = 'dsh-session-summary.card'
     const ENTRY_ID = 'dsh-session-summary.toggle'
     const STORAGE_KEY = 'dsh.session-summary.v1'
@@ -40,8 +41,6 @@ window.__ModuleLoader__.load({
       'pin': '固定摘要',
       'unpin': '取消固定',
       'pin.hint': '已固定：切换会话或刷新页面后仍会显示',
-      'drag.hint': '拖动以移动摘要；聚焦后用方向键移动，Home 恢复位置',
-      'position.reset': '靠边显示（避开正文）',
       'compact.expand': '展开摘要',
       'compact.collapse': '收起摘要',
       'more': '更多操作',
@@ -140,8 +139,6 @@ window.__ModuleLoader__.load({
       'pin': 'Pin summary',
       'unpin': 'Unpin',
       'pin.hint': 'Pinned: stays open across session switches and reloads',
-      'drag.hint': 'Drag to move summary; use arrow keys when focused, Home to reset',
-      'position.reset': 'Dock beside conversation',
       'compact.expand': 'Expand summary',
       'compact.collapse': 'Collapse summary',
       'more': 'More actions',
@@ -600,11 +597,11 @@ window.__ModuleLoader__.load({
       return isRecord(value) && Number.isFinite(value.left) && Number.isFinite(value.top)
         ? { left: value.left, top: value.top } : null
     }
-    function sanitizePrefs(value) {
-      // Each window starts open/pinned with only Changes expanded. Old saved
-      // close/collapse choices do not override startup; only position persists.
+    function sanitizePrefs() {
+      // Each window starts open/pinned with only Changes expanded; nothing from
+      // older versions (including a dragged position) overrides startup.
       const collapsed = Object.fromEntries(SECTION_IDS.filter((id) => id !== 'changes').map((id) => [id, true]))
-      return { pinned: true, collapsed, floating: false, position: sanitizePosition(value?.position) }
+      return { pinned: true, collapsed }
     }
     /** Reserve a column on wide conversations, or a row above narrow ones. */
     function summaryLayout(rect, viewport, floating) {
@@ -733,6 +730,7 @@ window.__ModuleLoader__.load({
     // only theme tokens are shared with the host.
     const CSS = `
 .dss-anchor{display:inline-flex;align-items:center;flex:none}
+.dss-card[data-docked]{position:relative;z-index:auto;width:100%;border:.5px solid var(--dsw-alias-border-l3,var(--dsw-alias-border-l1));border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-specific-menu));box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
 .dss-toggle{box-sizing:border-box;width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;position:relative;font:inherit}
 .dss-toggle:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dss-toggle:active{background:var(--dsw-alias-interactive-bg-active)}
@@ -747,8 +745,6 @@ window.__ModuleLoader__.load({
 .dss-head{flex:none;display:flex;align-items:center;gap:2px;padding:10px 8px 6px 14px;position:relative}
 .dss-project{flex:1;min-width:0;display:flex;align-items:center;gap:7px;margin-right:4px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px;font-weight:600;border-radius:var(--dsw-radius-xs)}
 .dss-project svg{flex:none;color:var(--dsw-alias-label-secondary)}
-.dss-project[data-dss-drag-handle]{cursor:grab;touch-action:none;user-select:none}
-.dss-card[data-dragging] .dss-project{cursor:grabbing}
 .dss-project:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
 .dss-project-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dss-icon-btn{box-sizing:border-box;width:24px;height:24px;padding:0;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;font:inherit}
@@ -962,7 +958,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
     function knownKey(t, key, fallback) { return ZH[key] !== undefined ? t(key) : fallback }
 
     /** Pure view of one prepared model; every action arrives as a callback. */
-    function SummaryCard({ model, t, actions, prefs, expanded, onExpand, menuOpen, setMenuOpen, notice, dragHandle, compact, compactExpanded, onToggleCompact }) {
+    function SummaryCard({ model, t, actions, prefs, expanded, onExpand, menuOpen, setMenuOpen, notice, compact, compactExpanded, onToggleCompact }) {
       const collapsed = prefs.collapsed ?? {}
       const toggleSection = actions.toggleSection
       const sections = []
@@ -1039,8 +1035,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const projectTip = project.cwd ? (project.current && project.current !== project.cwd ? `${project.cwd}\n${t('project.cwd', { path: project.current })}` : project.cwd) : t('project.none')
       return h(React.Fragment, null,
         h('div', { className: 'dss-head' },
-          h(Tip, { label: `${projectTip}\n${t('drag.hint')}` },
-            h('div', { className: 'dss-project', tabIndex: 0, 'aria-label': `${project.cwd || t('project.none')}. ${t('drag.hint')}`, 'data-dss-drag-handle': '', ...dragHandle }, h(Icon, { name: 'folder', size: 16 }), h('span', { className: 'dss-project-name' }, project.name || t('project.none')))),
+          h(Tip, { label: projectTip },
+            h('div', { className: 'dss-project', tabIndex: 0, 'aria-label': project.cwd || t('project.none') }, h(Icon, { name: 'folder', size: 16 }), h('span', { className: 'dss-project-name' }, project.name || t('project.none')))),
           compact ? h(Tip, { label: t(compactExpanded ? 'compact.collapse' : 'compact.expand') }, h('button', { type: 'button', className: 'dss-icon-btn', 'data-dss-compact': '', 'aria-expanded': compactExpanded, 'aria-label': t(compactExpanded ? 'compact.collapse' : 'compact.expand'), onClick: onToggleCompact }, h('span', { style: { display: 'inline-flex', transform: compactExpanded ? 'rotate(180deg)' : undefined } }, h(Icon, { name: 'chevronDown', size: 14 })))) : null,
           h(Tip, { label: t(prefs.pinned ? 'unpin' : 'pin') },
             h('button', { type: 'button', className: 'dss-icon-btn', 'aria-pressed': prefs.pinned, 'aria-label': t(prefs.pinned ? 'unpin' : 'pin'), 'data-dss-pin': '', onClick: actions.togglePin }, h(Icon, { name: prefs.pinned ? 'pinFill' : 'pin', size: 14 }))),
@@ -1051,8 +1047,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
           menuOpen ? h('ul', { className: 'dss-menu', role: 'group', 'aria-label': t('more') },
             h('li', null, h('button', { type: 'button', disabled: !project.cwd, onClick: () => { setMenuOpen(false); actions.copyPath() } }, h(Icon, { name: 'copy', size: 14 }), t('copyPath'))),
             h('li', null, h('button', { type: 'button', disabled: !actions.canOpenFilesTab(), onClick: () => { setMenuOpen(false); actions.openFilesTab() } }, h(Icon, { name: 'tree', size: 14 }), t('openFiles'))),
-            h('li', null, h('button', { type: 'button', onClick: () => { setMenuOpen(false); actions.refresh() } }, h(Icon, { name: 'refresh', size: 14 }), t('refresh'))),
-            h('li', null, h('button', { type: 'button', onClick: () => { setMenuOpen(false); actions.resetPosition() } }, h(Icon, { name: 'refresh', size: 14 }), t('position.reset')))) : null),
+            h('li', null, h('button', { type: 'button', onClick: () => { setMenuOpen(false); actions.refresh() } }, h(Icon, { name: 'refresh', size: 14 }), t('refresh')))) : null),
         notice ? h('div', { className: 'dss-notice', role: 'status' }, notice) : null,
         h('div', { className: 'dss-body', onPointerDown: menuOpen ? () => setMenuOpen(false) : undefined }, sections,
           model.partial ? h('div', { className: 'dss-note' }, t('partial'), h('button', { type: 'button', className: 'dss-link', disabled: model.loadingOlder, onClick: actions.loadOlder }, t(model.loadingOlder ? 'loadingOlder' : 'loadOlder'))) : null))
@@ -1151,7 +1146,6 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
 
       React.useLayoutEffect(() => { api.publish(sessionId, { model, context: { cwd, subagent, catalog: Array.isArray(catalog) ? catalog : EMPTY } }) }, [api, sessionId, model, cwd, subagent, catalog])
       React.useLayoutEffect(() => () => api.unpublish(sessionId), [api, sessionId])
-      const floating = useStore(api.prefs, (state) => state.floating)
       const cardHeight = useStore(api.ui, (state) => state.cardHeight)
       const cardHeightRef = React.useRef(cardHeight)
       cardHeightRef.current = cardHeight
@@ -1171,7 +1165,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
           content?.style.removeProperty('--dss-top-space')
         }
         const place = () => {
-          const anchor = summaryLayout(header.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, floating || !content)
+          const anchor = summaryLayout(header.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, !content)
           if (content && anchor.layout !== 'floating') {
             content.classList.add('dss-conversation-layout')
             content.style.setProperty('--dss-side-space', `${anchor.layout === 'side' ? anchor.width + 24 : 0}px`)
@@ -1188,7 +1182,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         window.addEventListener('resize', schedule)
         window.addEventListener('dsh:summary-accessory-change', schedule)
         return () => { observer?.disconnect(); cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); window.removeEventListener('dsh:summary-accessory-change', schedule); placeRef.current = null; clearSpace() }
-      }, [api, sessionId, anchorElement, floating])
+      }, [api, sessionId, anchorElement])
       return null
     }
 
@@ -1196,6 +1190,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
     const selectOpenSession = (value) => value.openSession
     const selectSidebarReveal = (value) => value.sidebarReveal
     const selectView = (value) => value.view
+    const selectDocked = (value) => value.docked
     const selectTip = (value) => value.tip
     function useRightSidebarOpen(api) { return React.useSyncExternalStore(api.subscribeSidebar, api.sidebarOpen, api.sidebarOpen) }
 
@@ -1238,8 +1233,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
     }
 
     // ---------------------------------------------------- frame overlay side
-    /** The card itself, rendered by this plugin's `shell.overlay` entry. */
-    function SummaryCardHost({ api, t, view, prefs }) {
+    /** The card itself: a seat in the shared card stack, or a fixed overlay when no stack exists. */
+    function SummaryCardHost({ api, t, view, prefs, docked = false }) {
       const { sessionId, model, context, anchor } = view
       const pinned = prefs.pinned
       const cardRef = React.useRef(null)
@@ -1253,12 +1248,11 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
 
       const [viewport, setViewport] = React.useState(() => ({ width: window.innerWidth, height: window.innerHeight, reservedHeight: summaryAccessoryHeight() }))
       const [measuredHeight, setMeasuredHeight] = React.useState(null)
-      const [dragPosition, setDragPosition] = React.useState(null)
-      const dragRef = React.useRef(null)
-      const placement = anchor ? cardPlacement(anchor, dragPosition ?? (prefs.floating ? prefs.position : null), viewport, measuredHeight, viewport.reservedHeight) : null
+      const placement = anchor && !docked ? cardPlacement(anchor, null, viewport, measuredHeight, viewport.reservedHeight) : null
       React.useLayoutEffect(() => {
         const resize = () => setViewport({ width: window.innerWidth, height: window.innerHeight, reservedHeight: summaryAccessoryHeight() })
-        const measure = () => { if (cardRef.current) { const height = cardRef.current.getBoundingClientRect().height; setMeasuredHeight(height); api.ui.set({ cardHeight: height }) } }
+        // In the stack the shared column reserves space; the card reports no height of its own.
+        const measure = () => { if (cardRef.current && !docked) { const height = cardRef.current.getBoundingClientRect().height; setMeasuredHeight(height); api.ui.set({ cardHeight: height }) } }
         measure()
         let frame = 0
         const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure) }
@@ -1267,8 +1261,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         window.addEventListener('resize', resize)
         window.addEventListener('dsh:summary-accessory-change', resize)
         return () => { observer?.disconnect(); cancelAnimationFrame(frame); window.removeEventListener('resize', resize); window.removeEventListener('dsh:summary-accessory-change', resize) }
-      }, [])
-      // Keep containing-block compensation separate from the user's viewport position.
+      }, [docked])
+      // Keep containing-block compensation separate from the anchored viewport position.
       React.useLayoutEffect(() => {
         const element = cardRef.current
         if (!element || !placement) return
@@ -1276,72 +1270,18 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         const dx = placement.left - rect.left, dy = placement.top - rect.top
         if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) setOffset((current) => ({ x: current.x + dx, y: current.y + dy }))
       }, [anchor, viewport, placement?.left, placement?.top, placement?.width, placement?.maxHeight])
-      React.useEffect(() => () => dragRef.current?.cleanup(), [])
-      const dragHandle = {
-        onPointerDown(event) {
-          if (event.button !== 0 || event.isPrimary === false || dragRef.current || !placement) return
-          const element = event.currentTarget
-          const rect = cardRef.current.getBoundingClientRect()
-          const startX = event.clientX, startY = event.clientY
-          const pointerId = event.pointerId
-          const drag = { last: null, cleanup: null }
-          const move = (next) => {
-            if (next.pointerId !== pointerId) return
-            const dx = next.clientX - startX, dy = next.clientY - startY
-            if (!drag.last && Math.hypot(dx, dy) < 3) return
-            const box = cardPlacement(anchor, { left: rect.left + dx, top: rect.top + dy }, { width: window.innerWidth, height: window.innerHeight }, rect.height, summaryAccessoryHeight())
-            drag.last = { left: box.left, top: box.top }
-            setDragPosition(drag.last)
-          }
-          const finish = (next) => {
-            if (next.pointerId !== undefined && next.pointerId !== pointerId) return
-            if (next.type === 'pointerup') move(next)
-            drag.cleanup()
-            if (drag.last && next.type !== 'pointercancel') api.setPosition(drag.last)
-            setDragPosition(null)
-          }
-          drag.cleanup = () => {
-            window.removeEventListener('pointermove', move)
-            window.removeEventListener('pointerup', finish)
-            window.removeEventListener('pointercancel', finish)
-            window.removeEventListener('blur', finish)
-            element.removeEventListener('lostpointercapture', finish)
-            dragRef.current = null
-            try { if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId) } catch { /* detached */ }
-          }
-          dragRef.current = drag
-          window.addEventListener('pointermove', move)
-          window.addEventListener('pointerup', finish)
-          window.addEventListener('pointercancel', finish)
-          window.addEventListener('blur', finish)
-          element.addEventListener('lostpointercapture', finish)
-          try { element.setPointerCapture(pointerId) } catch { /* window listeners also cover synthetic/unsupported capture */ }
-          setMenuOpen(false)
-          api.tip.set({ tip: null })
-          element.focus({ preventScroll: true })
-          event.preventDefault()
-        },
-        onKeyDown(event) {
-          if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing || dragRef.current) return
-          if (event.key === 'Home') { event.preventDefault(); api.setPosition(null); return }
-          const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key]
-          if (!direction || !placement) return
-          event.preventDefault()
-          const step = event.shiftKey ? 64 : 16
-          const box = cardPlacement(anchor, { left: placement.left + direction[0] * step, top: placement.top + direction[1] * step }, viewport, measuredHeight, viewport.reservedHeight)
-          api.setPosition({ left: box.left, top: box.top })
-        }
-      }
       React.useEffect(() => {
         if (pinned) return
         const onPointerDown = (event) => {
           const target = event.target
           if (cardRef.current?.contains?.(target) || target?.closest?.('[data-dsh-session-summary-toggle]')) return
+          // Reordering the stack is not a dismissal.
+          if (docked && target?.closest?.('[data-dsc-card-menu], .dsc-grip, .dsc-manage')) return
           close()
         }
         document.addEventListener('pointerdown', onPointerDown, true)
         return () => document.removeEventListener('pointerdown', onPointerDown, true)
-      }, [pinned, close])
+      }, [pinned, close, docked])
       React.useEffect(() => {
         const onKeyDown = (event) => {
           if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return
@@ -1374,7 +1314,6 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         return {
           close,
           togglePin: () => api.togglePin(sessionId),
-          resetPosition: () => api.setPosition(null),
           toggleSection: api.toggleSection,
           openChange: (file) => guard(() => api.openResource(changesReviewAddress(sessionId, file.latest.seq, file.latest.turn), { params: { index: file.latest.index } })),
           retryChanges: () => api.summaries.retry(sessionId),
@@ -1392,18 +1331,28 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         }
       }, [api, sessionId, cwd, context, close, t])
 
-      const style = placement
-        ? { ...placement, top: placement.top + offset.y, left: placement.left + offset.x }
-        : { visibility: 'hidden', top: 0, left: 0 }
-      return h('section', { id: CARD_ID, ref: cardRef, className: 'dss-card', role: 'dialog', 'aria-label': t('card.aria'), 'data-dsh-session-summary': sessionId, 'data-pinned': pinned ? '' : undefined, 'data-dragging': dragPosition ? '' : undefined, 'data-layout': anchor?.layout, 'data-compact-collapsed': compact && !compactExpanded ? '' : undefined, style },
-        h(SummaryCard, { model, t, actions, prefs, expanded, onExpand: (id) => setExpanded((current) => ({ ...current, [id]: !current[id] })), menuOpen, setMenuOpen, notice, dragHandle, compact, compactExpanded, onToggleCompact: () => setCompactExpanded(value => !value) }))
+      const style = docked
+        ? { maxHeight: Math.max(160, Math.min(anchor?.maxHeight ?? 480, viewport.height * 0.6)) }
+        : placement ? { ...placement, top: placement.top + offset.y, left: placement.left + offset.x } : { visibility: 'hidden', top: 0, left: 0 }
+      return h('section', { id: CARD_ID, ref: cardRef, className: 'dss-card', role: 'dialog', 'aria-label': t('card.aria'), 'data-dsh-session-summary': sessionId, 'data-docked': docked ? '' : undefined, 'data-pinned': pinned ? '' : undefined, 'data-layout': anchor?.layout, 'data-compact-collapsed': compact && !compactExpanded ? '' : undefined, style },
+        h(SummaryCard, { model, t, actions, prefs, expanded, onExpand: (id) => setExpanded((current) => ({ ...current, [id]: !current[id] })), menuOpen, setMenuOpen, notice, compact, compactExpanded, onToggleCompact: () => setCompactExpanded(value => !value) }))
+    }
+    /** Seat in the shared `capability-selector.accessories` card stack. */
+    function SummaryAccessory({ api, t, sessionId }) {
+      const view = useStore(api.view, selectView)
+      const prefs = useStore(api.prefs, selectPrefs)
+      const openSession = useStore(api.ui, selectOpenSession)
+      React.useLayoutEffect(() => (sessionId ? api.dock(sessionId) : undefined), [api, sessionId])
+      const open = Boolean(view?.model) && view.sessionId === sessionId && (prefs.pinned || openSession === sessionId)
+      return open ? h(ApiContext.Provider, { value: api }, h(SummaryCardHost, { key: sessionId, api, t, view, prefs, docked: true })) : null
     }
     function SummaryOverlay({ api, t }) {
       const view = useStore(api.view, selectView)
       const prefs = useStore(api.prefs, selectPrefs)
       const openSession = useStore(api.ui, selectOpenSession)
       const tip = useStore(api.tip, selectTip)
-      const open = Boolean(view?.model) && (prefs.pinned || openSession === view.sessionId)
+      const docked = useStore(api.ui, selectDocked)
+      const open = Boolean(view?.model) && (prefs.pinned || openSession === view.sessionId) && docked !== view.sessionId
       React.useEffect(() => {
         if (!tip) return
         const hide = () => api.hideTip(tip.id)
@@ -1418,8 +1367,9 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
 
     // ---------------------------------------------------------------- apply
     function createApi(ctx, { storage, fetchImpl, transportFetch, clipboard, openWindow, document: doc = globalThis.document }) {
-      const prefs = createStore(sanitizePrefs({}), { storage, key: STORAGE_KEY, sanitize: sanitizePrefs, serialize: ({ position }) => ({ position }) })
-      const ui = createStore({ openSession: null, cardHeight: 40, sidebarReveal: false })
+      const prefs = createStore(sanitizePrefs({}), { storage, key: STORAGE_KEY, sanitize: sanitizePrefs, serialize: () => ({}) })
+      const ui = createStore({ openSession: null, cardHeight: 40, sidebarReveal: false, docked: null })
+      const docks = new Map()
       const view = createStore({ view: null })
       const tip = createStore({ tip: null })
       const summaries = createSummaryCache(fetchImpl)
@@ -1434,8 +1384,18 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const tabs = () => service('sidebarRightTabs')
       return {
         prefs, ui, view, tip, summaries, service,
-        setPosition(position) { const next = sanitizePosition(position); prefs.set({ position: next, floating: next !== null }) },
         open(sessionId) { ui.set({ openSession: sessionId }) },
+        /** The card-stack seat claims rendering of this Session's card; the fixed overlay steps back. */
+        dock(sessionId) {
+          docks.set(sessionId, (docks.get(sessionId) ?? 0) + 1)
+          ui.set({ docked: sessionId, cardHeight: 0 })
+          return () => {
+            const count = (docks.get(sessionId) ?? 1) - 1
+            if (count > 0) { docks.set(sessionId, count); return }
+            docks.delete(sessionId)
+            if (ui.getSnapshot().docked === sessionId) ui.set({ docked: docks.keys().next().value ?? null })
+          }
+        },
         close() { prefs.set({ pinned: false }); ui.set({ openSession: null, sidebarReveal: false }) },
         // Read on every render, so a Session switch never shows a stale value.
         sidebarOpen: () => rightSidebarExpanded(service('sidebarRight'), doc),
@@ -1541,6 +1501,9 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       ctx.effect(() => ctx.slots.inject(OVERLAY_SLOT, () => ctx.slots.register({
         name: OVERLAY_SLOT, id: OVERLAY_ID, order: 40, locale: NS, label, inject: () => ({ api })
       }, SummaryOverlay)), '[session-summary] card overlay')
+      ctx.effect(() => ctx.slots.inject(ACCESSORY_SLOT, () => ctx.slots.register({
+        name: ACCESSORY_SLOT, id: NAME, order: -10, locale: NS, label, inject: () => ({ api })
+      }, SummaryAccessory)), '[session-summary] card stack seat')
     }
 
     return {
@@ -1548,7 +1511,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       // Pure helpers exported for the package's own tests.
       deriveChat, aggregateChanges, deriveSubagents, deriveRelated, deriveJobs, deriveTodos, planModeActive, fileReferences, parseMcpName, callInfo,
       fileAddressFor, changesReviewAddress, subagentChatAddress, planAddress, changesSummaryUrl, formatDuration, formatTokens, basename, hostOf, displayPath,
-      createStore, sanitizePrefs, sanitizePosition, cardPlacement, summaryLayout, summaryAccessoryHeight, createSummaryCache, createApi, rightSidebarExpanded, watchRightSidebar, SummaryCard, SummaryCardHost, SummaryOverlay, SummaryToggle, SummaryData, ApiContext,
+      createStore, sanitizePrefs, sanitizePosition, cardPlacement, summaryLayout, summaryAccessoryHeight, createSummaryCache, createApi, rightSidebarExpanded, watchRightSidebar, SummaryCard, SummaryCardHost, SummaryAccessory, SummaryOverlay, SummaryToggle, ACCESSORY_SLOT, SummaryData, ApiContext,
       HOST_ICONS, ZH, EN, CSS, SLOT, ENTRY_ID, OVERLAY_SLOT, OVERLAY_ID, STORAGE_KEY, SECTION_IDS
     }
   }
