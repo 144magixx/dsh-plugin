@@ -1,0 +1,12 @@
+{
+  "model": "gpt-image-2.5-sunburst",
+  "quality": "high",
+  "size": "1536x1024",
+  "n": 1,
+  "output_format": "png",
+  "promptFile": "/Users/minyuwei.6666/dsh-plugin/todo-design/page-gpt-image-2.5-prompt.txt",
+  "imagePath": "/Users/minyuwei.6666/dsh-plugin/todo-design/page-gpt-image-2.5-high-v1.png",
+  "bytes": 1233212,
+  "requestId": "c3a5c2a8-29e2-4a22-9a23-0c2d0f744105",
+  "createdAt": "2026-11-06T02:31:04.136Z"
+}

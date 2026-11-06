@@ -1,0 +1,12 @@
+{
+  "model": "gpt-image-2.5-sunburst",
+  "quality": "high",
+  "size": "1024x1536",
+  "n": 1,
+  "output_format": "png",
+  "promptFile": "/Users/minyuwei.6666/dsh-plugin/todo-design/sidebar-card-gpt-image-2.5-prompt.txt",
+  "imagePath": "/Users/minyuwei.6666/dsh-plugin/todo-design/sidebar-card-gpt-image-2.5-high-v1.png",
+  "bytes": 1261426,
+  "requestId": "a08e52b3-22c1-482f-be4d-8d000dbf298e",
+  "createdAt": "2026-11-06T02:31:31.779Z"
+}

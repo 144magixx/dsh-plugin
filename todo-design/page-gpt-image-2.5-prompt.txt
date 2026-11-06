@@ -1,0 +1,42 @@
+Use case: ui-mockup
+Asset type: High fidelity desktop software UI proposal, shown as one clean flat front-facing screenshot for user approval.
+Primary request: Design a "待办" (to-do / reminders) plugin page inside the DeepSeek Harness desktop app. It must feel strongly inspired by Apple iPhone / macOS "提醒事项" (Reminders): smart-list tiles with colored round icons and big counts, colored "我的列表", large colored list title, hollow round checkboxes, thin hairline separators, and a blue "新提醒事项" add row. Generate one clear recommended design, not a collage, not multiple alternatives.
+
+Canvas: 1536 x 1024 landscape. A flat app window screenshot with no device frame, no browser chrome, no desktop wallpaper.
+
+Region 1 — existing DSH app sidebar at far left, about 210 px wide, light neutral gray background (#F4F4F6):
+Top: a wide rounded white button with a small plus-in-circle icon and text exactly "新会话".
+Below it a vertical nav list with thin monochrome icons, text exactly in this order: "插件", "自动化任务", "会话导航", "待办", "更多". The "待办" item is the selected one, shown with a soft light-gray rounded highlight and a small checklist icon.
+Below a small gray section label exactly "工作区", then a few gray session titles in small text: "dsh-plugin", "本机外部能力选择插件", "会话搜索插件". Keep this sidebar quiet and secondary.
+
+Region 2 — the 待办 page, filling the rest of the window, split into two panes separated by a thin vertical hairline:
+
+Pane A — list navigator, about 330 px wide, very light gray background (#F7F7F8):
+A rounded search field with a magnifier icon and placeholder exactly "搜索".
+Below it, iOS-Reminders-style smart list tiles: white rounded cards (radius ~12 px) with a hairline border, arranged in a 2 x 2 grid plus one full-width tile below. Each tile: a solid colored circle with a white glyph at top-left, a large bold count number at top-right, and a gray label at bottom-left.
+ - "今天": blue circle (#007AFF) with white calendar glyph, count "3"
+ - "计划": red circle (#FF3B30) with white calendar-grid glyph, count "5"
+ - "全部": dark gray circle (#3A3A3C) with white tray glyph, count "12"
+ - "旗标": orange circle (#FF9500) with white flag glyph, count "2"
+ - full-width tile "已完成": gray circle (#8E8E93) with white checkmark glyph, no count
+The "今天" tile is selected: its card has a very light blue fill, matching the iOS selected state, still restrained.
+Section header in bold black, exactly "我的列表". Then a grouped white rounded list with hairline separators, each row: small solid colored circle with white list-bullet glyph, name, count right-aligned in gray:
+ - blue circle, "工作", "6"
+ - orange circle, "dsh-plugin", "4"
+ - green circle (#34C759), "个人", "2"
+At the bottom of pane A, blue text with a small plus-in-circle: exactly "添加列表".
+
+Pane B — selected list detail, white background, generous padding:
+Top row: very large bold title exactly "今天" in blue (#007AFF), and on the same baseline at the far right a large light-gray count "3". A small gray "…" more icon at top-right corner above.
+Below, items grouped into time sections like iOS: small bold gray section headers exactly "上午", "下午", "今晚".
+Each reminder row: a hollow round checkbox outline (gray, ~22 px) on the left, title in black regular weight, an optional second line in smaller gray text, and a third meta line in small text. Hairline separators start at the text column, not under the checkbox, exactly like iOS.
+ - Under "上午": row titled "确认待办插件设计稿", second line "与用户确认样式后开始实现", meta line in red "今天 10:30", with a small solid orange flag icon at the far right of the row.
+ - Under "下午": row titled "修复会话搜索高亮错位", meta line in gray "今天 16:30", plus a small rounded light-gray chip after the time containing a tiny speech-bubble icon and text "会话搜索插件" (this links the reminder to a DSH conversation).
+ - Under "下午": a just-completed row: the round checkbox is filled solid blue with a white checkmark, title in gray "提交 task-guardian 重构".
+ - Under "今晚": row titled "整理插件 README", meta line in gray "今天 21:00".
+Below the last row, an empty new-row affordance: a blue plus-in-circle icon followed by blue text exactly "新提醒事项".
+Large calm white space below; the page should breathe like Apple Reminders.
+
+Visual language: Apple iOS / macOS Reminders style merged with the restrained DSH productivity app: white and very light gray surfaces, very thin neutral hairline borders, consistent rounded corners, almost no shadow, black primary text, medium gray secondary text, iOS system colors only for list icons, the selected tile tint, the blue title, the completed checkbox, and the blue add actions. Chinese typography like PingFang SC, crisp and legible, comfortable line height. No gradients, no illustrations, no emoji.
+
+Constraints: one flat screenshot-style design. All Chinese and English text must be exactly as specified, accurate, sharp, not garbled, not overlapping. No annotations, arrows, labels outside the UI, marketing copy, watermarks, device mockups, or developer details.

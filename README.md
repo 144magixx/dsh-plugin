@@ -14,6 +14,7 @@
 | **外部能力 · Capability Selector** | [capability-selector](capability-selector/README.md) | 发现并去重本机 Skills、企业 CLI 与 MCP，选择本次任务的能力；入口位于摘要下方 | `dsh-capability-selector` |
 | **任务守护 · Task Guardian** | [task-guardian](task-guardian/README.md) | 原生优先的临时故障守护、恢复审查和问题倒计时；自动恢复与作答保持人工确认 | `dsh-task-guardian` |
 | **会话导航 · Session Navigator** | [session-navigator](session-navigator/README.md) | 稳定标题配合最近话题、后台 Luna 摘要、悬停详情与最近访问，快速找回会话 | `dsh-session-navigator` |
+| **待办 · Todo** | [todo](todo/README.md) | 仿 iPhone 提醒事项：左侧导航完整页面与右侧卡片，智能列表、截止时间与旗标、关联会话、到点提醒，Agent 可读写 | `dsh-todo` |
 
 ## 获取代码
 
@@ -110,3 +111,4 @@ dsh-plugin/
 - 会话摘要：[使用文档](session-summary/docs/使用文档.md)、[README](session-summary/README.md)
 - 会话搜索：[README](session-search/README.md)、[验收记录](session-search/docs/验收记录.md)
 - 会话导航：[README](session-navigator/README.md)、[使用指南](session-navigator/docs/使用指南.md)
+- 待办：[README](todo/README.md)、[设计稿](todo-design/README.md)

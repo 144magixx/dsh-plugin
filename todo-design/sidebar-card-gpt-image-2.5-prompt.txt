@@ -1,0 +1,30 @@
+Use case: ui-mockup
+Asset type: High fidelity desktop software right-sidebar UI proposal, shown as a clean flat screenshot for user approval.
+Primary request: Design a compact "待办" (to-do / reminders) quick-view card for the right sidebar of the DeepSeek Harness desktop app, inspired by the Apple iPhone "提醒事项" (Reminders) widget: hollow round checkboxes, a blue add row, a colored count. It sits between two existing cards and must look like it belongs to the same product. Generate one clear recommended design, not a collage, not alternatives.
+
+Canvas: 1024 x 1536 portrait. Show only the right sidebar region on a very light neutral gray background, with three vertically stacked cards of identical width, aligned to the same left and right edges (approximately x=90 to x=934), 28 px vertical gaps. The cards should fill most of the canvas height.
+
+Card 1 — existing compact session summary card, top:
+White rounded card with a hairline gray border, about 110 px high. Left: gray outline folder icon and bold title exactly "dsh-plugin". Right: small gray down chevron, blue pin icon, gray ellipsis, gray close X.
+
+Card 2 — new 待办 card, middle, about 760 px high:
+White rounded card with the same hairline border, radius and padding as the others.
+Header row: a thin outline checklist icon, bold title exactly "待办" in the same size and weight as the other card titles. At the right side of the header: a small blue pill text exactly "今天 3", then a gray plus icon, then a gray right chevron (opens the full 待办 page).
+Body: a list of reminders exactly like iOS Reminders, each row with a hollow gray round checkbox (~22 px) on the left, title in black, one small meta line below, and hairline separators that start at the text column, not under the checkbox:
+ - "确认待办插件设计稿", meta in red "10:30 已逾期", with a small solid orange flag icon at the far right.
+ - "修复会话搜索高亮错位", meta in gray "16:30", followed by a small rounded light-gray chip with a tiny speech-bubble icon and text "会话搜索插件".
+ - completed row: checkbox filled solid blue with a white checkmark, title in gray "提交 task-guardian 重构".
+ - "整理插件 README", meta in gray "21:00".
+Below the list, a blue plus-in-circle icon followed by blue text exactly "新提醒事项".
+Card footer separated by a hairline: small gray text at left exactly "全部 12 项 · 计划 5 项", and at right small gray text exactly "打开待办" with a right chevron.
+
+Card 3 — existing Task Guardian card, bottom, about 300 px high:
+White rounded card, same family. Header left: black outline shield icon, title exactly "任务守护", a small right chevron. Header right: a blue toggle switch in the ON position.
+Body text in gray, three separate lines exactly:
+"守护已开启 · 0 次"
+"无界重试可能持续产生费用。"
+"开启守护不会自动重放已经结束的失败轮次。"
+
+Visual language: restrained native DSH / macOS productivity app merged with iOS Reminders details: white surfaces, very thin neutral borders, consistent large rounded corners, barely visible shadow, black primary labels, medium gray supporting text, thin monochrome icons. Color only on: the blue pill, blue pin, blue toggle, blue completed checkbox, blue add row, red overdue time, orange flag. Chinese typography like PingFang SC, crisp and legible. No gradients, no illustrations, no emoji.
+
+Constraints: one flat front-facing screenshot-style design. All text exactly as specified, accurate, sharp, not garbled, not overlapping. No browser chrome, full app layout, device frame, annotations, arrows, marketing text, watermarks, or developer details.
