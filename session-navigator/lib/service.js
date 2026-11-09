@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { projectionDefinition, foldProjection, buildSummaryInput, parseSummary, SUMMARY_PROMPT, isSubstantiveInput } from './core.js';
 
 export const DEFAULTS = Object.freeze({ provider: 'codex-relay', model: 'gpt-6-luna', autoSummarize: true, debounceMs: 1200, timeoutMs: 20000, concurrency: 2, initialSummaries: 12, failureThreshold: 3, cooldownMs: 60000, maxQueue: 48 });
@@ -62,7 +62,7 @@ export class NavigatorService {
     this.ctx = ctx; this.table = table; this.config = resolveConfig(config);
     this.states = new Map(); this.headers = new Map(); this.readErrors = new Map();
     this.timers = new Map(); this.queue = new Map(); this.active = new Map(); this.writes = new Map();
-    this.listeners = new Set(); this.revision = 0; this.closed = false; this.lifetime = new AbortController();
+    this.listeners = new Set(); this.revision = 0; this.watchEpoch = randomUUID(); this.closed = false; this.lifetime = new AbortController();
     this.catalogAt = 0; this.catalogPromise = null; this.ready = null;
     this.failures = 0; this.cooldownUntil = 0; this.cooldownTimer = null;
   }

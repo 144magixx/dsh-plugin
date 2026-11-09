@@ -30,26 +30,53 @@ export function routeHandler(service, action) {
     } catch (error) { return errorResponse(error); }
   };
 }
-export function watchHandler(service) {
+// This response is tracked by the Desktop Host until its body ends. Keep the
+// entire request (including a stalled JSON body) well below its 10s drain limit.
+export const WATCH_DURATION_MS = 2500;
+export function watchHandler(service, { durationMs = WATCH_DURATION_MS } = {}) {
+  if (!Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > WATCH_DURATION_MS) throw new RangeError('Watch duration must be between 1 and 2500ms.');
   return async request => {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), durationMs);
+    let cleanup = () => clearTimeout(timer);
     try {
-      const signal = AbortSignal.any([request.signal, service.lifetime.signal]);
+      const signal = AbortSignal.any([request.signal, service.lifetime.signal, deadline.signal]);
       await readBody(request, signal);
-      const encoder = new TextEncoder(); let cleanup = () => {};
+      const encoder = new TextEncoder(); let flush = () => {};
       const stream = new ReadableStream({
         start(controller) {
-          let closed = false; let heartbeat;
-          const emit = frame => { if (closed) return; try { controller.enqueue(encoder.encode(JSON.stringify(frame) + '\n')); } catch { cleanup(); } };
-          const unsubscribe = service.subscribe(emit);
-          cleanup = () => { if (closed) return; closed = true; unsubscribe(); clearInterval(heartbeat); signal.removeEventListener('abort', cleanup); try { controller.close(); } catch {} };
+          let closed = false; let pending; let unsubscribe = () => {}; let bytes = 0; let frames = 0;
+          cleanup = () => {
+            if (closed) return;
+            closed = true; pending = undefined; clearTimeout(timer); unsubscribe();
+            signal.removeEventListener('abort', cleanup);
+            try { controller.close(); } catch {}
+          };
+          const emit = frame => {
+            if (closed) return;
+            // Retain at most one queued frame and one coalesced invalidation.
+            // Coalescing drops the session ID so no changed session is missed.
+            if (controller.desiredSize <= 0) { pending = { revision: frame.revision }; return; }
+            if (pending) { frame = { revision: frame.revision }; pending = undefined; }
+            try {
+              const chunk = encoder.encode(JSON.stringify(frame) + '\n');
+              // Also bound the complete HTTP body so a paused socket cannot
+              // accumulate enough writes to strand the bridge on backpressure.
+              if (bytes + chunk.byteLength > 4096 || frames >= 32) { cleanup(); return; }
+              bytes += chunk.byteLength; frames++; controller.enqueue(chunk);
+            } catch { cleanup(); }
+          };
+          flush = () => { if (pending) { const frame = pending; pending = undefined; emit(frame); } };
+          unsubscribe = service.subscribe(emit);
           signal.addEventListener('abort', cleanup, { once: true });
           if (signal.aborted) cleanup();
-          else { emit({ revision: service.revision }); heartbeat = setInterval(() => emit({ heartbeat: true, revision: service.revision }), 25000); }
+          else emit({ revision: service.revision, epoch: service.watchEpoch });
         },
+        pull() { flush(); },
         cancel() { cleanup(); },
-      });
+      }, { highWaterMark: 1 });
       return new Response(stream, { headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } });
-    } catch (error) { return errorResponse(error); }
+    } catch (error) { cleanup(); return errorResponse(error); }
   };
 }
 export function createTool(service) {
