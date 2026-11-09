@@ -1,0 +1,5 @@
+# Client-only plugin: the native composer attachment rail stays in place and is wrapped.
+- insert:
+    - id: image-annotate
+      name: dsh-image-annotate
+      config: {}

@@ -15,6 +15,7 @@
 | **任务守护 · Task Guardian** | [task-guardian](task-guardian/README.md) | 原生优先的临时故障守护、恢复审查和问题倒计时；自动恢复与作答保持人工确认 | `dsh-task-guardian` |
 | **会话导航 · Session Navigator** | [session-navigator](session-navigator/README.md) | 稳定标题配合最近话题、后台 Luna 摘要、悬停详情与最近访问，快速找回会话 | `dsh-session-navigator` |
 | **待办 · Todo** | [todo](todo/README.md) | 仿 iPhone 提醒事项：左侧导航完整页面与右侧卡片，智能列表、截止时间与旗标、关联会话、到点提醒，Agent 可读写 | `dsh-todo` |
+| **图片标注 · Image Annotate** | [image-annotate](image-annotate/README.md) | 双击输入框里的待发送图片进行标注（文字、圈画、箭头、序号、荧光笔、马赛克），保存后原位替换原图 | `dsh-image-annotate` |
 
 ## 获取代码
 
