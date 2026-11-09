@@ -175,6 +175,11 @@ window.__ModuleLoader__.load({
       let watchAbort
       let reconnectTimer
       let reconnectAttempt = 0
+      let reconnectRequested = false
+      // Preserve the cursor across short HTTP subscriptions. An epoch detects
+      // service replacement even when its revision happens to have the same value.
+      let lastRevision = null
+      let lastEpoch
       const requests = new Set()
       const detailRequests = new Map()
       const itemVersions = new Map()
@@ -273,35 +278,54 @@ window.__ModuleLoader__.load({
         }, debounceMs)
       }
       async function connectWatch() {
-        if (disposed || watchAbort) return
-        clearTimeout(reconnectTimer)
+        if (disposed || watchAbort || reconnectTimer != null) return
         const abort = watchAbort = newAbort()
-        let lastRevision = null
-        store.set({ watchState: 'connecting', watchError: '' })
+        let retryDelay = null
+        let receivedFrame = false
+        let initial = true
+        if (store.getSnapshot().watchState !== 'connected') store.set({ watchState: 'connecting', watchError: '' })
         try {
           const response = await fetchImpl('/api/session-navigator/watch', {
             method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
             body: '{}', signal: abort.signal,
           })
-          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          if (disposed || abort.signal.aborted) { try { await response.body?.cancel() } catch {} return }
+          if (!response.ok) {
+            try { await response.body?.cancel() } catch {}
+            throw new Error(`HTTP ${response.status}`)
+          }
           await readChanges(response.body, abort.signal, frame => {
             if (disposed || abort.signal.aborted) return
+            receivedFrame = true
             reconnectAttempt = 0
-            store.set({ watchState: 'connected', watchError: '' })
-            if (frame.revision !== lastRevision) { lastRevision = frame.revision; scheduleInvalidation(frame) }
+            if (store.getSnapshot().watchState !== 'connected') store.set({ watchState: 'connected', watchError: '' })
+            const replaced = frame.epoch !== undefined && frame.epoch !== lastEpoch
+            const changed = replaced || frame.revision !== lastRevision
+            const gap = lastRevision !== null && frame.revision !== lastRevision + 1
+            if (frame.epoch !== undefined) lastEpoch = frame.epoch
+            lastRevision = frame.revision
+            // Initial snapshots and revision gaps cover all sessions, including
+            // changes that arrived while disconnected or were coalesced.
+            if (changed) scheduleInvalidation(initial || replaced || gap ? { revision: frame.revision } : frame)
+            initial = false
           })
-          if (!abort.signal.aborted) throw new Error('Stream disconnected')
+          if (!abort.signal.aborted) {
+            if (!receivedFrame) throw new Error('Empty change stream')
+            // EOF is the server's normal rotation; keep the connected UI state.
+            retryDelay = 100
+          }
         } catch (error) {
           if (!disposed && !abort.signal.aborted) {
             const unavailable = error?.code === 'STREAM_UNAVAILABLE'
             store.set({ watchState: unavailable ? 'unsupported' : 'disconnected', watchError: errorMessage(error) })
-            // Retry the long-lived stream only; never poll session data.
-            if (!unavailable) {
-              const delay = Math.min(15000, 1000 * 2 ** Math.min(reconnectAttempt++, 4))
-              reconnectTimer = setTimeout(() => { reconnectTimer = null; void connectWatch() }, delay)
-            }
+            if (!unavailable) retryDelay = Math.min(15000, 1000 * 2 ** Math.min(reconnectAttempt++, 4))
           }
-        } finally { releaseAbort(abort); if (watchAbort === abort) watchAbort = null }
+        } finally {
+          releaseAbort(abort)
+          if (watchAbort === abort) watchAbort = null
+          if (reconnectRequested) { reconnectRequested = false; retryDelay = 0 }
+          if (!disposed && retryDelay !== null) reconnectTimer = setTimeout(() => { reconnectTimer = null; void connectWatch() }, retryDelay)
+        }
       }
       async function mutate(id, action, payload) {
         if (disposed || !id || store.getSnapshot().actions[id]?.busy) return
@@ -362,10 +386,10 @@ window.__ModuleLoader__.load({
           } catch (error) { if (!disposed) setAction(id, { opening: false, openError: errorMessage(error) }) }
         },
         reconnect() {
-          clearTimeout(reconnectTimer)
-          watchAbort?.abort(); watchAbort = null; reconnectAttempt = 0
-          void connectWatch()
-          if (activePages) void loadList(false, true)
+          if (disposed) return
+          clearTimeout(reconnectTimer); reconnectTimer = null; reconnectAttempt = 0
+          if (watchAbort) { reconnectRequested = true; watchAbort.abort() }
+          else void connectWatch()
         },
         dispose() {
           disposed = true
