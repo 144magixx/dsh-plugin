@@ -241,9 +241,14 @@ window.__ModuleLoader__.load({
     function dockPlacement(summary, fallback, viewport, measuredHeight = DOCK_HEIGHT) {
       const { left: vx = 0, top: vy = 0, width: vw, height: vh } = viewport
       const width = Math.max(1, Math.min(summary?.width ?? 320, vw - 24))
-      const maxHeight = Math.max(1, Math.min(vh - 24, Math.max(DOCK_HEIGHT, vh - 24 - (summary ? 40 + RESERVE_GAP : 0))))
+      // A tall stack scrolls inside the room below the owning header; it may
+      // slide up toward the header to fit but never over its controls (the
+      // right-sidebar and summary toggles live there).
+      const minTop = fallback ? clamp(fallback.bottom + 8, vy + 12, vy + vh - Math.min(DOCK_HEIGHT, vh - 24) - 12) : vy + 12
+      const maxHeight = Math.max(1, Math.min(vh - 24, vy + vh - 12 - minTop))
       const height = clamp(Number.isFinite(measuredHeight) && measuredHeight > 0 ? measuredHeight : DOCK_HEIGHT, 1, maxHeight)
-      return { left: clamp(summary?.left ?? (fallback?.right ?? vx + vw) - width - 12, vx + 12, vx + vw - width - 12), top: clamp(summary ? summary.bottom + 8 : (fallback?.bottom ?? vy + 52) + 8, vy + 12, vy + vh - height - 12), width, height, maxHeight }
+      const top = clamp(summary ? summary.bottom + 8 : fallback ? minTop : vy + 60, minTop, vy + vh - height - 12)
+      return { left: clamp(summary?.left ?? (fallback?.right ?? vx + vw) - width - 12, vx + 12, vx + vw - width - 12), top, width, height, maxHeight }
     }
     function panelPlacement(dock, viewport) {
       const { left: vx = 0, top: vy = 0, width: vw, height: vh } = viewport

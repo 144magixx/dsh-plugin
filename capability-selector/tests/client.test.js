@@ -54,6 +54,20 @@ test('fallback stays beside owning header, independent of summary length', () =>
   assert.equal(placement.top, 82);
 });
 
+test('a stack taller than the viewport scrolls below the header instead of covering its controls', () => {
+  const header = { right: 1303, bottom: 46 }, viewport = { width: 1303, height: 804 };
+  for (const measured of [700, 780, 2000]) {
+    const dock = dockPlacement(null, header, viewport, measured);
+    assert.equal(dock.top, 54, JSON.stringify({ measured, dock }));
+    assert.equal(dock.maxHeight, 804 - 12 - 54);
+    assert.ok(dock.height <= dock.maxHeight);
+  }
+  // A floating summary may be overlapped to fit, the header never.
+  const below = dockPlacement({ left: 980, bottom: 300, width: 320 }, header, viewport, 2000);
+  assert.equal(below.top, 54); assert.equal(below.top + below.height, 804 - 12);
+  assert.equal(dockPlacement({ left: 980, bottom: 300, width: 320 }, header, viewport, 200).top, 308);
+});
+
 test('selection adds canonical instructions to the exact binding and never submits', async () => {
   const { api, calls, binding } = harness();
   api.open(); await tick();
@@ -227,8 +241,10 @@ test('own dock ResizeObserver measures companions, publishes only changed reserv
   assert.equal(values.get('--dsh-summary-accessory-height'), '48px', 'unmounting a companion releases its additional reserve');
   dockHeight = 500; win.innerHeight = 190;
   resizeObservers[0].callback(); flush();
-  assert.equal(geometry.dock.height, 114);
-  assert.equal(values.get('--dsh-summary-accessory-height'), '126px');
+  // Header bottom 74: the column scrolls in 190 - 12 - 82 = 96px below it.
+  assert.equal(geometry.dock.height, 96);
+  assert.equal(geometry.dock.top, 82, 'a tall column never rides up over the header');
+  assert.equal(values.get('--dsh-summary-accessory-height'), '108px');
   assert.ok(geometry.dock.top + geometry.dock.height <= 178);
   for (const off of effects.reverse()) off?.();
   assert.equal(values.get('--dsh-summary-accessory-height'), '19px');
