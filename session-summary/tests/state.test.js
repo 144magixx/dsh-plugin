@@ -351,3 +351,14 @@ test('an expanded right sidebar hides the card until the toggle reveals it; clos
   assert.equal(typeof stop, 'function');
   stop();
 });
+
+test('a closed summary comes back pinned from its stack seat; a reveal is set only beside an open sidebar', () => {
+  let expanded = false;
+  const { api } = harness({ sidebarRight: { isExpanded: () => expanded } });
+  api.close();
+  api.show('a');
+  assert.deepEqual([api.prefs.getSnapshot().pinned, api.ui.getSnapshot().openSession, api.ui.getSnapshot().sidebarReveal], [true, 'a', false]);
+  api.close(); expanded = true;
+  api.show('b');
+  assert.deepEqual([api.prefs.getSnapshot().pinned, api.ui.getSnapshot().openSession, api.ui.getSnapshot().sidebarReveal], [true, 'b', true]);
+});

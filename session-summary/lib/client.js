@@ -37,6 +37,8 @@ window.__ModuleLoader__.load({
       'title': '会话摘要',
       'toggle.open': '显示会话摘要',
       'toggle.close': '隐藏会话摘要',
+      'seat.hidden': '已隐藏',
+      'seat.show': '显示',
       'card.aria': '会话摘要',
       'pin': '固定摘要',
       'unpin': '取消固定',
@@ -135,6 +137,8 @@ window.__ModuleLoader__.load({
       'title': 'Session summary',
       'toggle.open': 'Show session summary',
       'toggle.close': 'Hide session summary',
+      'seat.hidden': 'Hidden',
+      'seat.show': 'Show',
       'card.aria': 'Session summary',
       'pin': 'Pin summary',
       'unpin': 'Unpin',
@@ -731,6 +735,13 @@ window.__ModuleLoader__.load({
     const CSS = `
 .dss-anchor{display:inline-flex;align-items:center;flex:none}
 .dss-card[data-docked]{position:relative;z-index:auto;width:100%;border:.5px solid var(--dsw-alias-border-l3,var(--dsw-alias-border-l1));border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-specific-menu));box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+.dss-seat{box-sizing:border-box;width:100%;display:flex;align-items:center;gap:8px;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l3,var(--dsw-alias-border-l1));border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-alias-bg-layer-1,var(--dsw-specific-menu));color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;text-align:left;cursor:pointer}
+.dss-seat:hover{background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover))}
+.dss-seat:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}
+.dss-seat svg{flex:none;width:16px;height:16px;color:var(--dsw-alias-label-secondary)}
+.dss-seat-title{font-weight:600;white-space:nowrap}
+.dss-seat-hint{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--dsw-alias-label-tertiary)}
+.dss-seat-action{flex:none;font-size:12px;color:var(--dsw-alias-state-business-primary)}
 .dss-toggle{box-sizing:border-box;width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;position:relative;font:inherit}
 .dss-toggle:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dss-toggle:active{background:var(--dsw-alias-interactive-bg-active)}
@@ -1343,8 +1354,13 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       const prefs = useStore(api.prefs, selectPrefs)
       const openSession = useStore(api.ui, selectOpenSession)
       React.useLayoutEffect(() => (sessionId ? api.dock(sessionId) : undefined), [api, sessionId])
-      const open = Boolean(view?.model) && view.sessionId === sessionId && (prefs.pinned || openSession === sessionId)
-      return open ? h(ApiContext.Provider, { value: api }, h(SummaryCardHost, { key: sessionId, api, t, view, prefs, docked: true })) : null
+      const wanted = prefs.pinned || openSession === sessionId
+      const open = Boolean(view?.model) && view.sessionId === sessionId && wanted
+      if (open) return h(ApiContext.Provider, { value: api }, h(SummaryCardHost, { key: sessionId, api, t, view, prefs, docked: true }))
+      // A closed summary keeps a one-line seat, so the stack itself can bring it back.
+      if (!sessionId || wanted) return null
+      return h('button', { type: 'button', className: 'dss-seat', 'data-dss-seat': '', 'aria-label': t('toggle.open'), onClick: () => api.show(sessionId) },
+        h(Icon, { name: 'list', size: 16 }), h('span', { className: 'dss-seat-title' }, t('title')), h('span', { className: 'dss-seat-hint' }, t('seat.hidden')), h('span', { className: 'dss-seat-action' }, t('seat.show')))
     }
     function SummaryOverlay({ api, t }) {
       const view = useStore(api.view, selectView)
@@ -1397,6 +1413,11 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
           }
         },
         close() { prefs.set({ pinned: false }); ui.set({ openSession: null, sidebarReveal: false }) },
+        /** Bring a closed summary back from its stack seat, pinned as at startup. */
+        show(sessionId) {
+          prefs.set({ pinned: true })
+          ui.set({ openSession: sessionId, ...(rightSidebarExpanded(service('sidebarRight'), doc) ? { sidebarReveal: true } : {}) })
+        },
         // Read on every render, so a Session switch never shows a stale value.
         sidebarOpen: () => rightSidebarExpanded(service('sidebarRight'), doc),
         subscribeSidebar: (listener) => watchRightSidebar(service('sidebarRight'), listener, doc),
