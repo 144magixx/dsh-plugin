@@ -1,0 +1,39 @@
+Use case: ui-mockup
+Asset type: High fidelity desktop software UI proposal, shown as one clean flat front-facing screenshot for user approval.
+Primary request: Design a Codex-style "划词提问" (Selection Ask) plugin inside the DeepSeek Harness (DSH) desktop app, showing BOTH Scenario A (text selection pill inside the center conversation area) and Scenario B (floating quick-ask popover over a code file preview in the right sidebar), while the left workspace sidebar remains completely clean with no temporary sessions added.
+
+Canvas: 1536 x 1024 landscape. One flat desktop application window screenshot, light theme, no device frame, no browser chrome, no desktop wallpaper, no outside annotations.
+
+Region 1 — Left Workspace Sidebar (far left, ~200 px wide, light neutral gray #F4F4F6):
+- Top: a rounded white button with a small plus icon and text "新会话".
+- Below: vertical navigation rows with thin monochrome icons: "插件", "自动化任务", "会话导航", "待办".
+- Below: section header "工作区", folder group "dsh-plugin", and only TWO main sessions listed: "划词提问插件开发" (selected, soft gray highlight) and "待办插件设计". No selection-ask temporary sessions appear here.
+
+Region 2 — Center Main Conversation Area (~580 px wide, white background #FFFFFF, separated by thin hairline border):
+- Top header bar: session title "划词提问插件开发".
+- Chat transcript body showing a completed assistant explanation about DSH plugin architecture:
+  - A paragraph of Chinese text where one sentence "通过 origin: subagent 创建隐藏会话，不会进入工作区列表" is highlighted with a soft translucent blue text selection (#D6E8FF).
+  - Directly above that highlighted sentence floats a crisp white pill toolbar (rounded 999px, thin border, subtle elevation shadow) containing two side-by-side buttons separated by a thin vertical divider:
+    - Left button: "引用文本"
+    - Right button (with a tiny sparkle/chat icon in blue #0066FF): "划词提问"
+- Bottom of center pane: the standard DSH rounded message composer input box with placeholder "发送消息…" and model label "Gemini 4 Argon".
+
+Region 3 — Right Sidebar File Preview with Floating Selection-Ask Popover (~756 px wide, #FAFAFC background):
+- Top tab strip of right sidebar: active code tab "service.js", second tab "report.html", third tab "文件", and a "+" button.
+- File path header row below tabs: "selection-ask / lib / service.js" with wrap and reload icons on the right.
+- Code viewer body showing numbered JavaScript lines (lines 38 to 62) in clean monospace font.
+- Lines 42 to 46 (`const resolved = await this.ctx.llm.resolveCallConfig(config.model);`) are highlighted with a translucent blue selection band.
+- Anchored right below line 46, floating over the lower half of the code viewer without switching tabs, is the expanded "划词提问" Floating Popover Card (width ~520 px, white background #FFFFFF, 14px rounded corners, crisp 1px border #E2E4E9, soft panel shadow):
+  - Popover Header bar (draggable):
+    - Left: bold title "划词提问" followed by a small light-blue source chip "service.js : 42-46".
+    - Right: three compact action buttons: "历史 (3)", "固定到侧栏", and close "×".
+  - Quoted Snippet Strip (below header, light gray box #F5F6F8, 12px font):
+    - Monospace excerpt: `> const resolved = await this.ctx.llm.resolveCallConfig(config.model);`
+  - Popover Conversation Area:
+    - User question bubble (right-aligned, soft gray pill): "如果模型不可用，帮我在这里加上回退到默认模型的逻辑"
+    - Tool execution fold line (muted gray text with a tiny green check dot): "已调用 read, edit · 已修改 lib/service.js"
+    - Assistant answer (clean markdown text): "已为 `resolveCallConfig` 增加回退处理：当原模型不可用时自动读取 `agentDefaultModel` 并记录日志，已直接写入 `lib/service.js`。"
+  - Popover Bottom Composer:
+    - A compact rounded input row with placeholder "继续追问，或要求直接修改文件… (Enter 发送)" and a solid blue round send button (#0066FF) on the right.
+
+Visual language: restrained native DSH / macOS productivity app aesthetic, crisp PingFang SC Chinese typography and JetBrains Mono code font, clean hairline borders, subtle floating elevation for the selection pill and popover card, accurate Chinese and English text with zero gibberish or overlapping labels.

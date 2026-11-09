@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>selection-ask DOM fixture</title>
+<style>
+  body { font: 14px/1.6 -apple-system, sans-serif; margin: 0; display: grid; grid-template-columns: 420px 1fr; gap: 16px; padding: 16px; }
+  pre { margin: 0; }
+  iframe { width: 100%; height: 220px; border: 1px solid #ccc; }
+  .line { display: block; }
+</style>
+</head>
+<body>
+  <!-- Mirrors the DOM attributes DSH 0.2.2 Chat and document preview render. -->
+  <section data-conversation-scroll>
+    <div data-chat-flow-kind="user" data-chat-turn="1"><div data-text-interaction-source id="source">Native source text handled by Chat.</div></div>
+    <div data-chat-flow-kind="assistant-step" data-chat-turn="2"><div data-turn-process-member><pre id="tool">$ npm test
+ok 23 tests passed</pre></div></div>
+    <div data-composer-seat><textarea id="composer">draft</textarea></div>
+  </section>
+  <section>
+    <div data-textpreview-url="dsh-resource://file/session/sess-1/lib/service.js" data-document-preview="@deepseek-ai/dsh-client-ui-sidebar-documentpreview/code">
+      <span data-textpreview-path title="/repo/lib/service.js">/repo/lib/service.js</span>
+      <div data-textpreview-body><div data-code-preview><pre id="code"></pre></div></div>
+    </div>
+    <div data-textpreview-url="dsh-resource://file/session/sess-1/notes.txt" data-document-preview="@deepseek-ai/dsh-client-ui-sidebar-documentpreview/text">
+      <span data-textpreview-path>/repo/notes.txt</span>
+      <div data-textpreview-body><pre id="plain"></pre></div>
+    </div>
+    <div data-textpreview-url="dsh-resource://file/session/sess-1/README.md" data-document-preview="@deepseek-ai/dsh-client-ui-sidebar-documentpreview/markdown">
+      <span data-textpreview-path>/repo/README.md</span>
+      <div data-textpreview-body><h2>Install</h2><p id="md">Run the installer, then restart the host to load the plugin.</p></div>
+    </div>
+    <div data-textpreview-url="dsh-resource://file/session/sess-1/docs/report.html" data-document-preview="@deepseek-ai/dsh-client-ui-sidebar-documentpreview/html">
+      <span data-textpreview-path>/repo/docs/report.html</span>
+      <div data-selection-ask-html style="display:contents"><iframe id="frame" data-html-preview sandbox="allow-scripts" title="html"></iframe></div>
+    </div>
+    <!-- dsh-better-sidebar style tabs inside the native right-sidebar panel. -->
+    <div data-sidebar-right-session="sess-2" id="panel">
+      <span data-sidebar-right-tab="t9">app.ts</span><span data-sidebar-right-tab="t10">GUIDE.md</span><span data-sidebar-right-tab="t11">/repo/site/index.html</span>
+      <div data-sidebar-right-tab="t9"><div class="cm-editor"><div class="cm-content" contenteditable="true" id="cm"></div></div></div>
+      <div data-sidebar-right-tab="t10"><div data-dsh-md-surface><h3>Usage</h3><p id="bsmd">Open the tab and select a sentence here.</p></div></div>
+      <div data-sidebar-right-tab="t11"><iframe id="sameorigin" title="/repo/site/index.html" style="width:100%;height:120px"></iframe></div>
+    </div>
+  </section>
+<script>
+  window.__ModuleLoader__ = { load(registration) { window.__registration = registration } }
+</script>
+<script src="../../lib/client.js"></script>
+<script>
+  const stubReact = { createElement: () => null, Fragment: 'Fragment' }
+  window.saClient = window.__registration.factory((id) => { if (id === 'react') return stubReact; throw new Error(id) })
+  const code = document.getElementById('code')
+  for (let index = 1; index <= 60; index++) { const line = document.createElement('span'); line.className = 'line'; line.textContent = `const value${index} = compute(${index});`; code.append(line) }
+  const plain = document.getElementById('plain')
+  for (let index = 1; index <= 30; index++) { const line = document.createElement('div'); line.setAttribute('data-textpreview-line', String(index)); line.textContent = `note line ${index}\n`; plain.append(line) }
+  // Interactive HTML preview: opaque-origin Blob document carrying the injected bridge.
+  const html = '<!doctype html><html><head><title>Report</title></head><body><h1>桌面更新排空兼容性报告</h1><h2>结论</h2><p id="target">订阅流硬性寿命上限设为 2.5 秒，显著小于宿主 10 秒排空期限。</p></body></html>'
+  const bytes = window.saClient.injectBridge(new TextEncoder().encode(html))
+  document.getElementById('frame').src = URL.createObjectURL(new Blob([bytes], { type: 'text/html;charset=utf-8' }))
+  window.frameMessages = []
+  window.addEventListener('message', (event) => { if (event.data?.source === 'dsh-selection-ask' && event.source === document.getElementById('frame').contentWindow) window.frameMessages.push(event.data) })
+  window.selectRange = (startNode, startOffset, endNode, endOffset) => { const range = document.createRange(); range.setStart(startNode, startOffset); range.setEnd(endNode, endOffset); const selection = document.getSelection(); selection.removeAllRanges(); selection.addRange(range) }
+  // Minimal CodeMirror 6 surface: `.cm-content.cmTile` is a DocTile carrying the EditorView.
+  const cmLines = Array.from({ length: 40 }, (_, index) => `let row${index + 1} = ${index + 1};`)
+  const cm = document.getElementById('cm')
+  for (const text of cmLines) { const line = document.createElement('div'); line.className = 'cm-line'; line.textContent = text; cm.append(line) }
+  const offsets = []; let total = 0
+  for (const text of cmLines) { offsets.push(total); total += text.length + 1 }
+  const doc = {
+    lines: cmLines.length,
+    lineAt(pos) { let number = 1; while (number < cmLines.length && offsets[number] <= pos) number++; return { number, from: offsets[number - 1], text: cmLines[number - 1] } },
+    line(number) { return { number, from: offsets[number - 1], text: cmLines[number - 1] } },
+  }
+  window.cmView = { state: { doc, selection: { main: { from: offsets[9] + 4, to: offsets[12] + 6 } }, sliceDoc: (from, to) => cmLines.join('\n').slice(from, to) },
+    coordsAtPos: () => { const rect = cm.children[9].getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom } } }
+  cm.cmTile = { view: window.cmView }
+  document.getElementById('sameorigin').srcdoc = '<!doctype html><meta charset="utf-8"><h2>Overview</h2><p id="so">Same-origin preview text for selection.</p>'
+  window.read = () => { const value = window.saClient.readDomSelection(document, 'mounted-session'); return value && JSON.parse(JSON.stringify(value)) }
+</script>
+</body>
+</html>

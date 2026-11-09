@@ -1,0 +1,12 @@
+{
+  "model": "gpt-image-2.5-sunburst",
+  "quality": "high",
+  "size": "1536x1024",
+  "n": 1,
+  "output_format": "png",
+  "promptFile": "/Users/minyuwei.6666/dsh-plugin/selection-ask-design/popover-gpt-image-2.5-prompt.txt",
+  "imagePath": "/Users/minyuwei.6666/dsh-plugin/selection-ask-design/popover-gpt-image-2.5-high-v1.png",
+  "bytes": 1758183,
+  "requestId": "f2cfa4e0-8446-4226-a4db-6d8b52516984",
+  "createdAt": "2026-11-09T03:30:23.014Z"
+}

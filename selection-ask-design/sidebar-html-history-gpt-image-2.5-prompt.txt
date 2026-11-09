@@ -1,0 +1,38 @@
+Use case: ui-mockup
+Asset type: High fidelity desktop software UI proposal, shown as one clean flat front-facing screenshot for user approval.
+Primary request: Design the second view of the "划词提问" (Selection Ask) plugin inside the DeepSeek Harness (DSH) desktop app, showing: (1) selecting text inside an HTML document preview (`report.html`) in the right sidebar with the floating "划词提问" pill, and (2) the split-pane "划词提问" Right Sidebar Tab alongside it with the in-plugin "历史提问" (History) dropdown open.
+
+Canvas: 1536 x 1024 landscape. One flat desktop application window screenshot, light theme, no device frame, no browser chrome, no desktop wallpaper, no outside annotations.
+
+Region 1 — Left Workspace Sidebar (far left, ~190 px wide, light neutral gray #F4F4F6):
+- Top button: "新会话".
+- Nav items: "插件", "自动化任务", "会话导航", "待办".
+- Section "工作区" -> "dsh-plugin" -> only two main sessions: "划词提问插件开发" (selected) and "待办插件设计". No selection-ask sessions appear in the left workspace list.
+
+Region 2 — Center Main Conversation Area (~430 px wide, white background #FFFFFF):
+- Header: "划词提问插件开发".
+- A clean chat view with a brief assistant message and the bottom composer "发送消息…".
+
+Region 3 — Right Sidebar Split into Two Side-by-Side Panes (~916 px total width, separated by a vertical hairline divider):
+
+Pane 3A (Left Pane of Right Sidebar, ~450 px wide) — HTML Document Preview (`report.html`):
+- Top tab bar: active tab with HTML icon titled "report.html", second tab "service.js".
+- Path bar: "docs / report.html" with a viewer dropdown pill showing "HTML".
+- Rendered HTML document body inside the preview:
+  - A clean styled HTML technical report card with heading "桌面更新排空兼容性报告" and a small data table.
+  - A sentence in the HTML paragraph "订阅流硬性寿命上限设为 2.5 秒，显著小于宿主 10 秒排空期限" is highlighted with a blue text selection (#D6E8FF).
+  - Floating directly above that selection inside the HTML preview is the compact white pill button (rounded 999px, subtle shadow) with a blue sparkle/chat icon and text "划词提问".
+
+Pane 3B (Right Pane of Right Sidebar, ~466 px wide) — Pinned "划词提问" Sidebar Tab with History Drawer Open:
+- Top tab bar: active tab titled "划词提问" with a "+" button on the right.
+- Sub-header bar of the "划词提问" tab:
+  - Left: source badge chip "report.html · HTML 选区"
+  - Right: active button "历史提问 (3) ▾" and "新建提问"
+- Floating dropdown panel anchored under "历史提问 (3) ▾" (white rounded card, crisp border, subtle shadow, showing recent selection-ask threads stored inside the plugin without polluting the left workspace):
+  - Row 1 (active, light blue tint): "解释 2.5 秒排空寿命上限的设计原因" · chip "report.html" · "刚刚"
+  - Row 2: "resolveCallConfig 失败回退逻辑" · chip "service.js : 42-46" · "5 分钟前" · small trash icon
+  - Row 3: "为什么隐藏会话不传 parentSession" · chip "会话框 · 第 2 轮" · "12 分钟前" · small trash icon
+  - Footer of dropdown: muted text "仅保存在插件内，不进入左侧工作区" and right-aligned link "清空历史".
+- Below the dropdown, the active thread's conversation messages and bottom input box "继续追问… (支持读写文件与工具调用)" with a blue send button.
+
+Visual language: restrained native DSH / macOS productivity app aesthetic, crisp PingFang SC Chinese typography, clean hairline borders, accurate Chinese and English text, no gibberish, no overlapping text, no marketing annotations.

@@ -1,0 +1,8 @@
+node_modules/
+scripts/.runtime/
+.test-data/
+tests/.integration-data/
+artifacts/*
+!artifacts/.gitkeep
+*.log
+.DS_Store

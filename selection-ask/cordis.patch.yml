@@ -1,0 +1,4 @@
+# Add only this plugin; native conversation, quote and preview rows stay in place.
+- insert:
+    - id: dsh-selection-ask
+      name: dsh-selection-ask

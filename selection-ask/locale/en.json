@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Selection Ask",
+    "description": "Select text in the conversation or a sidebar file (code, text, Markdown, PDF, HTML) and ask about it; side questions never appear in the workspace list."
+  }
+}

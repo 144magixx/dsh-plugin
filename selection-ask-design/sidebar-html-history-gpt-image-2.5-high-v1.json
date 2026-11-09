@@ -1,0 +1,12 @@
+{
+  "model": "gpt-image-2.5-sunburst",
+  "quality": "high",
+  "size": "1536x1024",
+  "n": 1,
+  "output_format": "png",
+  "promptFile": "/Users/minyuwei.6666/dsh-plugin/selection-ask-design/sidebar-html-history-gpt-image-2.5-prompt.txt",
+  "imagePath": "/Users/minyuwei.6666/dsh-plugin/selection-ask-design/sidebar-html-history-gpt-image-2.5-high-v1.png",
+  "bytes": 1769078,
+  "requestId": "79bdd0ca-9631-4856-8c74-de2495842669",
+  "createdAt": "2026-11-09T03:30:13.144Z"
+}
