@@ -14,7 +14,7 @@ runInNewContext(source, {
   crypto: globalThis.crypto,
 }, { filename: 'dsh-selection-ask/client.js', timeout: 1000 });
 if (registration?.id !== 'dsh-selection-ask') throw new Error('Unexpected Client module registration');
-const ReactStub = Object.freeze({ createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), Fragment: 'Fragment' });
+const ReactStub = Object.freeze({ createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), createContext: (value) => ({ Provider: 'Provider', _default: value }), Fragment: 'Fragment' });
 export const client = registration.factory((id) => {
   requested.push(id);
   if (id === 'react') return ReactStub;

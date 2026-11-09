@@ -6,3 +6,4 @@ artifacts/*
 !artifacts/.gitkeep
 *.log
 .DS_Store
+tests/browser/.real/

@@ -491,6 +491,7 @@ export class SelectionAskService {
       revision: this.token(record.id), thread: publicThread(record), running, live: Boolean(agent),
       stream: stream ? { text: stream.text, reasoning: stream.reasoning } : null,
       model: this.describeModel(model, catalog),
+      cwd: (() => { try { return agent?.session?.header?.cwd ?? record.cwd ?? null; } catch { return record.cwd ?? null; } })(),
       messages: fold.messages, trimmed: fold.trimmed, pending,
       error: this.errors.get(record.sessionId) ?? fold.unavailable ?? null,
     };

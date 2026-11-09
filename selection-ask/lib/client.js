@@ -55,6 +55,8 @@ window.__ModuleLoader__.load({
       truncated: '选区较长，已截断为前 {count} 个字符', error: '出错了', reconnecting: '连接中断，正在重试…', gone: '这条划词提问已被删除',
       noSession: '请先打开一个会话再划词提问', trimmed: '仅显示最近的消息', unavailable: '历史内容暂不可读：{message}', running: '运行中',
       attach: '添加图片（也可粘贴或拖入）', removeImage: '移除图片', images: '{count} 张图片', tooManyImages: '每条消息最多 {count} 张图片', imageTooLarge: '图片不能超过 10 MB：{name}', imageType: '仅支持 PNG、JPEG、WebP、GIF：{name}',
+      copy: '复制', copied: '已复制', codeBlock: '代码', wrap: '自动换行', unwrap: '取消换行', footnotes: '脚注', renderFailed: '这条消息无法渲染，已显示原文',
+      openFile: '打开 {name}', imageOpen: '查看图片', imageLoading: '图片加载中…', imageFailed: '图片加载失败', imageDialog: '图片预览',
       noImageModel: '当前模型不支持图片输入，请换一个模型', model: '模型', modelLoading: '正在读取模型…', modelFailed: '读取模型失败', modelDefault: '跟随当前会话', modelHint: '只影响这次划词提问，不会改变默认模型',
     }
     const EN = {
@@ -71,6 +73,8 @@ window.__ModuleLoader__.load({
       truncated: 'Long selection truncated to the first {count} characters', error: 'Something went wrong', reconnecting: 'Connection lost, retrying…', gone: 'This side question was deleted',
       noSession: 'Open a conversation before asking about a selection', trimmed: 'Showing recent messages only', unavailable: 'History is unavailable: {message}', running: 'Running',
       attach: 'Add images (or paste / drop them)', removeImage: 'Remove image', images: '{count} image(s)', tooManyImages: 'At most {count} images per message', imageTooLarge: 'Images must be under 10 MB: {name}', imageType: 'Only PNG, JPEG, WebP and GIF are supported: {name}',
+      copy: 'Copy', copied: 'Copied', codeBlock: 'Code', wrap: 'Wrap', unwrap: 'Unwrap', footnotes: 'Footnotes', renderFailed: 'This message could not be rendered; showing plain text',
+      openFile: 'Open {name}', imageOpen: 'View image', imageLoading: 'Loading image…', imageFailed: 'Image failed to load', imageDialog: 'Image preview',
       noImageModel: 'The current model does not accept images; choose another model', model: 'Model', modelLoading: 'Loading models…', modelFailed: 'Could not load models', modelDefault: 'Same as this conversation', modelHint: 'Applies to this side question only; your default model is unchanged',
     }
 
@@ -500,7 +504,7 @@ window.__ModuleLoader__.load({
 .sa-note{margin:6px 14px 0;color:var(--dsw-alias-label-tertiary);font-size:12px}
 .sa-body{flex:1;min-height:60px;overflow:auto;padding:10px 14px;display:flex;flex-direction:column;gap:10px}
 .sa-user{align-self:flex-end;max-width:88%;padding:6px 11px;border-radius:12px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1));white-space:pre-wrap;overflow-wrap:anywhere}
-.sa-assistant{min-width:0;overflow-wrap:anywhere}.sa-assistant .sa-plain{white-space:pre-wrap}
+.sa-assistant{min-width:0}.sa-assistant .sa-plain{white-space:pre-wrap}
 .sa-meta{display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-tertiary);font-size:12px;margin-bottom:4px}
 .sa-dot{width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-state-success-primary,#2bb673);flex:none}.sa-dot[data-state=error]{background:var(--dsw-alias-state-error-primary,#e5484d)}.sa-dot[data-state=running]{background:var(--dsw-alias-link,#2f6fec)}
 .sa-error{color:var(--dsw-alias-label-error,#d92d20);white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
@@ -568,9 +572,79 @@ window.__ModuleLoader__.load({
     // React.memo / forwardRef components are objects, not functions.
     const isComponent = (value) => typeof value === 'function' || (value !== null && typeof value === 'object' && '$$typeof' in value)
     const MarkdownText = primitives && isComponent(primitives.MarkdownText) ? primitives.MarkdownText : null
-    function RichText({ text, streaming }) {
+    const MarkdownDelegateProvider = primitives && isComponent(primitives.MarkdownDelegateProvider) ? primitives.MarkdownDelegateProvider : null
+    // Same address grammar as the native file links (dsh-util-workspace-path).
+    function encodeSegment(segment) { return encodeURIComponent(segment).replace(/%3A/gi, ':') }
+    function sessionFileAddress(sessionId, path) {
+      const normalized = String(path).replace(/\\/g, '/').replace(/^(?:\.\/)+/, '')
+      return `dsh-resource://file/session/${encodeSegment(sessionId)}/${normalized.split('/').map(encodeSegment).join('/')}`
+    }
+    function isAbsolutePath(path) { return path.startsWith('/') || /^[A-Za-z]:[/\\]/.test(path) || path.startsWith('\\\\') }
+    function resolvePath(cwd, path) {
+      if (!path || isAbsolutePath(path) || !cwd) return path
+      const separator = /^[A-Za-z]:[/\\]/.test(cwd) && cwd.includes('\\') ? '\\' : '/'
+      return `${cwd.replace(/[/\\]+$/, '')}${separator}${path.replace(/^(?:\.?[/\\])+/, '')}`
+    }
+    function fileMediaUrl(path) {
+      if (typeof document === 'undefined' || !path || !isAbsolutePath(path) || /^[/\\]{2}/.test(path) || /[\u0000-\u001f\u007f]/.test(path)) return undefined
+      const base = document.baseURI
+      if (!/^https?:/.test(base) && !base.startsWith('dsh-app://app/')) return undefined
+      return new URL(`api/file?path=${encodeURIComponent(path)}`, base).href
+    }
+    function decodePathValue(value) { try { return decodeURIComponent(String(value).split(/[?#]/)[0] ?? '') } catch { return undefined } }
+    /** Markdown delegate for one thread: links open in the right sidebar of the source conversation, local images load through the file route. */
+    /** Labels the native MarkdownText requires (code-block toolbar and footnotes). */
+    function markdownLabels(t) {
+      return { code: { copyLabel: t('copy'), copiedLabel: t('copied'), toolbarLabels: { codeLabel: t('codeBlock'), wrapLabel: t('wrap'), unwrapLabel: t('unwrap') } }, footnotes: t('footnotes') }
+    }
+    // Used when the host exposes no file-drag service: dragging an image simply does nothing.
+    const NO_FILE_DRAG = Object.freeze({ prepare: () => Promise.reject(new Error('file drag unavailable')), reportFailure() {} })
+    function createLinks(runtime, sourceSessionId, cwd, t) {
+      const resolve = (path) => resolvePath(cwd ?? undefined, path)
+      const openFile = async (path, options) => {
+        if (!sourceSessionId) return
+        const address = sessionFileAddress(sourceSessionId, resolve(path))
+        runtime.openResource(address, options?.line === undefined ? undefined : { params: { line: options.line } })
+      }
+      return {
+        openFile,
+        openExternalLink: (url) => runtime.openExternal(url),
+        labels: markdownLabels(t),
+        fileImages: {
+          fileDrag: runtime.fileDrag?.() ?? NO_FILE_DRAG,
+          resolve: (path) => fileMediaUrl(resolve(path)),
+          resourceAddress: (path) => sourceSessionId ? sessionFileAddress(sourceSessionId, resolve(path)) : undefined,
+          labels: { open: t('imageOpen'), loading: t('imageLoading'), failed: t('imageFailed'), dialog: t('imageDialog'), close: t('close') },
+        },
+        pathImages: { resolve: (value) => { const path = decodePathValue(value); return path ? fileMediaUrl(resolve(path)) : undefined } },
+        mentions(files) {
+          if (!files?.length) return undefined
+          const base = (path) => path.split(/[/\\]/).at(-1)
+          return { resolve(value) {
+            const matches = new Set(files.filter((path) => path === value || base(path) === value || resolve(path) === value))
+            const path = matches.size === 1 ? matches.values().next().value : undefined
+            if (path === undefined) return undefined
+            return { open: () => { void openFile(path) }, label: t('openFile', { name: path }), title: resolve(path) }
+          } }
+        },
+      }
+    }
+    const LinksContext = React.createContext(null)
+    /** Contain a render failure to one message: show its plain text instead of unmounting the panel. */
+    const RenderGuard = typeof React.Component === 'function' ? class RenderGuard extends React.Component {
+      constructor(props) { super(props); this.state = { failed: false } }
+      static getDerivedStateFromError() { return { failed: true } }
+      componentDidCatch(error) { console.warn('[selection-ask] message render failed:', errorText(error)) }
+      componentDidUpdate(previous) { if (this.state.failed && previous.text !== this.props.text) this.setState({ failed: false }) }
+      render() { return this.state.failed ? (this.props.fallback !== undefined ? this.props.fallback : h('div', { className: 'sa-plain' }, this.props.text)) : this.props.children }
+    } : null
+    function RichText({ text, streaming, files }) {
+      const links = React.useContext(LinksContext)
       if (!text) return null
-      return MarkdownText ? h(MarkdownText, { text, streaming: streaming === true }) : h('div', { className: 'sa-plain' }, text)
+      if (!MarkdownText) return h('div', { className: 'sa-plain' }, text)
+      const labels = links?.labels
+      const markdown = h(MarkdownText, { text, streaming: streaming === true, ...(labels ? { labels } : {}), ...(links ? { pathImages: links.pathImages, fileMentions: links.mentions(files) } : {}) })
+      return RenderGuard ? h(RenderGuard, { text }, markdown) : markdown
     }
 
     function ToolSummary({ tools, t }) {
@@ -610,7 +684,15 @@ window.__ModuleLoader__.load({
       h('div', { className: 'sa-row' }, h('button', { type: 'button', className: 'sa-tool sa-primary', disabled: busy, onClick: submit }, t('submitAnswer'))))
     }
 
-    function Messages({ view, t, onAnswer, bodyRef }) {
+    function Messages({ view, t, onAnswer, bodyRef, runtime, sourceSessionId }) {
+      const cwd = view?.cwd ?? null
+      const links = React.useMemo(() => runtime ? createLinks(runtime, sourceSessionId, cwd, t) : null, [runtime, sourceSessionId, cwd, t])
+      const body = h(MessageList, { view, t, onAnswer, bodyRef })
+      if (!links) return body
+      const provided = h(LinksContext.Provider, { value: links }, body)
+      return MarkdownDelegateProvider ? h(MarkdownDelegateProvider, { openFile: links.openFile, openExternalLink: links.openExternalLink, fileImages: links.fileImages }, provided) : provided
+    }
+    function MessageList({ view, t, onAnswer, bodyRef }) {
       const messages = view?.messages ?? []
       const last = messages.at(-1)
       const running = view?.running === true
@@ -621,7 +703,7 @@ window.__ModuleLoader__.load({
           ? h('div', { key: message.id, className: 'sa-user' }, message.text, message.images ? h('div', { className: 'sa-image-note' }, `🖼 ${t('images', { count: message.images })}`) : null)
           : h('div', { key: message.id, className: 'sa-assistant' },
             h(ToolSummary, { tools: message.tools, t }),
-            h(RichText, { text: message.text }),
+            h(RichText, { text: message.text, files: message.files }),
             message.status === 'stopped' && h('div', { className: 'sa-meta' }, t('stopped')),
             message.error && h('div', { className: 'sa-error' }, `${t('failed')}: ${message.error}`))),
         running && h('div', { className: 'sa-assistant' }, stream?.text ? h(RichText, { text: stream.text, streaming: true }) : h('div', { className: 'sa-shimmer' }, stream?.reasoning ? t('thinking') : last?.role === 'assistant' ? t('answering') : t('thinking'))),
@@ -835,11 +917,16 @@ window.__ModuleLoader__.load({
         selection?.truncated && h('div', { className: 'sa-note' }, t('truncated', { count: MAX_TEXT })),
         !selection && !threadId && h('div', { className: 'sa-empty' }, t('emptyHint')),
         gone && h('div', { className: 'sa-empty' }, t('gone')),
-        h(Messages, { view: view?.thread?.id === threadId ? view : null, t, onAnswer: answer, bodyRef }),
+        h(Messages, { view: view?.thread?.id === threadId ? view : null, t, onAnswer: answer, bodyRef, runtime, sourceSessionId: view?.thread?.sourceSessionId ?? sourceSessionId }),
         error && !gone && h('div', { className: 'sa-note' }, error.status === 503 || error.status === 0 ? t('reconnecting') : `${t('error')}: ${errorText(error)}`),
         (threadId || compose) && !gone && h(Composer, { key: threadId ?? 'compose', runtime, onSubmit: submit, onStop: threadId ? stop : null, running, placeholder: threadId ? t('placeholder') : t('placeholderFirst'), t, autoFocus: mode === 'popover' || !threadId, model, onModel: changeModel, sourceSessionId }))
     }
 
+    /** Keep a panel failure inside the panel, with a way out (close / back to empty). */
+    function guarded(t, key, child, reset) {
+      if (!RenderGuard) return child
+      return h(RenderGuard, { key, fallback: h('div', { className: 'sa-empty' }, h('div', { className: 'sa-error' }, t('renderFailed')), h('button', { type: 'button', className: 'sa-tool', style: { marginTop: 8 }, onClick: reset }, t('close'))) }, child)
+    }
     function Popover({ runtime, t, popover }) {
       const ref = React.useRef(null)
       const [position, setPosition] = React.useState(null)
@@ -881,8 +968,8 @@ window.__ModuleLoader__.load({
         if (runtime.pin(popover.threadId, popover.sourceSessionId)) runtime.store.closePopover()
       }
       return h('div', { ref, className: 'sa-popover', 'data-selection-ask-ui': '', role: 'dialog', 'aria-label': t('title'), style: position ? { left: position.left, top: position.top } : { left: -9999, top: 0, visibility: 'hidden' } },
-        h(ThreadPanel, { runtime, t, mode: 'popover', threadId: popover.threadId, compose: popover.compose, sourceSessionId: popover.sourceSessionId,
-          onThread: (id, created) => id ? runtime.store.setPopoverThread(id, created === true) : runtime.store.closePopover(), onClose: () => runtime.store.closePopover(), onPin: pin, headProps }))
+        guarded(t, popover.threadId ?? 'compose', h(ThreadPanel, { runtime, t, mode: 'popover', threadId: popover.threadId, compose: popover.compose, sourceSessionId: popover.sourceSessionId,
+          onThread: (id, created) => id ? runtime.store.setPopoverThread(id, created === true) : runtime.store.closePopover(), onClose: () => runtime.store.closePopover(), onPin: pin, headProps }), () => runtime.store.closePopover()))
     }
 
     function FloatingPill({ runtime, t, pill }) {
@@ -920,7 +1007,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { if (params?.threadId) setThreadId(params.threadId) }, [revision])
       const select = (id) => { setThreadId(id); if (id) runtime.remember(sessionId, id) }
       return h('div', { className: 'sa-tab', 'data-selection-ask-ui': '' },
-        h(ThreadPanel, { runtime, t, mode: 'tab', threadId, compose: null, sourceSessionId: sessionId, active: tab.visible !== false, onThread: select }))
+        guarded(t, threadId ?? 'empty', h(ThreadPanel, { runtime, t, mode: 'tab', threadId, compose: null, sourceSessionId: sessionId, active: tab.visible !== false, onThread: select }), () => select(null)))
     }
 
     /** Companion action beside the native Quote button for Chat text sources. */
@@ -985,6 +1072,18 @@ window.__ModuleLoader__.load({
           return promise
         },
         mountedSession: mounted,
+        fileDrag() { try { return ctx.get?.('fileDrag')?.actions } catch { return undefined } },
+        openResource(address, options) {
+          try { options ? ctx.sidebarRight.openResource(address, options) : ctx.sidebarRight.openResource(address) }
+          catch (error) { console.warn('[selection-ask] open file failed:', errorText(error)) }
+        },
+        openExternal(url) {
+          let safe
+          try { const parsed = new URL(url); safe = parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : undefined } catch { safe = undefined }
+          if (!safe) return
+          try { if (ctx.get?.('sidebarRightTabs')?.get?.('browser') !== undefined) { ctx.sidebarRight.openTab('browser', { params: { url: safe } }); return } } catch {}
+          window.open(safe, '_blank', 'noopener,noreferrer')
+        },
         lastThread(sessionId) { try { return JSON.parse(storage?.getItem(LAST_THREAD_KEY) ?? '{}')[sessionId] ?? null } catch { return null } },
         remember(sessionId, threadId) {
           if (!sessionId || !threadId) return
@@ -1184,7 +1283,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'uiConversation'],
       apply,
       // Test surface.
-      parseFileAddress, baseName, clipSelection, selectionLabel, modelLabel, isComponent, MarkdownText, linesAround, backoffDelay, relativeTime, placeNear, createApi, createFeed,
+      parseFileAddress, baseName, clipSelection, selectionLabel, modelLabel, isComponent, MarkdownText, sessionFileAddress, resolvePath, createLinks, markdownLabels, linesAround, backoffDelay, relativeTime, placeNear, createApi, createFeed,
       injectBridge, injectBridgeText, selectionBridge, readDomSelection, createStore, sidebarContext, codeMirrorView, codeMirrorSelection, ZH, EN, CSS, MAX_TEXT, OPERATIONS,
     }
   },

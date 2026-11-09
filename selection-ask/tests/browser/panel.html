@@ -18,7 +18,7 @@
   const view = (threadId) => ({ ok: true, revision: 'e:' + window.calls.length, running: false, live: true, stream: null, pending: [], error: null, trimmed: false,
     thread: { id: threadId, title: 'q', selection: { kind: 'chat', role: 'tool', turn: 2, text: 'npm test passed' } },
     model: { provider: 'claude-relay', model: 'claude-opus-5-5', name: 'Claude Opus 5.5', reasoningEffort: 'high', effortName: 'High', images: true },
-    messages: [{ id: 'u1', role: 'user', text: '这是什么', images: 1 }, { id: 'a1', role: 'assistant', text: '**粗体** 和表格\n\n| a | b |\n|---|---|\n| 1 | 2 |', tools: [{ id: 'c', name: 'read', status: 'done' }], status: 'done' }] })
+    cwd: '/repo/work', messages: [{ id: 'u1', role: 'user', text: '这是什么', images: 1 }, { id: 'a1', role: 'assistant', text: '![暴力枚举树 vs. 最短路节点账本](brute_force_vs_shortest_path_ledger.png) 见 `brute_force_vs_shortest_path_ledger.png`', files: ['brute_force_vs_shortest_path_ledger.png'], tools: [{ id: 'c', name: 'present', status: 'done' }], status: 'done' }] })
   const catalog = { ok: true, current: { provider: 'claude-relay', model: 'claude-opus-5-5', name: 'Claude Opus 5.5', reasoningEffort: 'high', effortName: 'High', images: true },
     groups: [{ id: 'claude-relay', name: 'Claude Relay', models: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: [{ id: 'high', name: 'High' }, { id: 'max', name: 'Max' }], defaultEffort: 'high', images: true }, { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', images: true }] },
       { id: 'google', name: 'Google', models: [{ id: 'gemini-4-argon', name: 'Gemini 4 Argon', images: false }] }] }
@@ -36,11 +36,22 @@
 <script src="/selection-ask/lib/client.js"></script>
 <script>
   const h = React.createElement
-  const MarkdownText = React.memo(function MarkdownText({ text }) { return h('div', { 'data-native-markdown': '' }, text) })
+  const Delegate = React.createContext({})
+  const MarkdownDelegateProvider = function ({ children, openFile, openExternalLink, fileImages }) { return h(Delegate.Provider, { value: { openFile, openExternalLink, fileImages } }, children) }
+  const MarkdownText = React.memo(function MarkdownText({ text, pathImages, fileMentions }) {
+    const delegate = React.useContext(Delegate)
+    const image = /!\[([^\]]*)\]\(([^)]+)\)/.exec(text)
+    const code = /`([^`]+)`/.exec(text)
+    const mention = code ? fileMentions?.resolve(code[1]) : undefined
+    return h('div', { 'data-native-markdown': '' },
+      image ? h('img', { 'data-md-image': '', alt: image[1], src: pathImages?.resolve(image[2]) ?? '' }) : null,
+      mention ? h('button', { 'data-md-mention': '', title: mention.title, onClick: mention.open }, mention.label) : null,
+      h('span', { 'data-has-delegate': typeof delegate.openFile === 'function' && typeof delegate.fileImages?.resolve === 'function' ? 'yes' : 'no' }))
+  })
   const mod = window.__registration.factory((id) => {
     if (id === 'react') return React
     if (id === 'react-dom') return ReactDOM
-    if (id === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText }
+    if (id === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText, MarkdownDelegateProvider }
     throw new Error(id)
   })
   const registered = []
@@ -49,7 +60,7 @@
     effect(fn) { fn() },
     locale: { register(ns, dict) { dictionaries[ns] = dict; return () => {} }, bind: (ns) => (key, params = {}) => String(dictionaries[ns]?.zh?.[key] ?? key).replace(/\{(\w+)\}/g, (_, k) => params[k] ?? '') },
     slots: { inject(_, fn) { return fn() }, register(options, component) { registered.push({ options, component }); return () => {} }, entries: () => [], subscribe: () => () => {} },
-    sidebarRight: { mounted: { getSnapshot: () => 'sess-main' }, openTab(kind, options) { window.pinned = { kind, options } } },
+    sidebarRight: { mounted: { getSnapshot: () => 'sess-main' }, openTab(kind, options) { window.pinned = { kind, options } }, openResource(address, options) { window.openedResource = { address, options } } },
     sidebarRightTabs: { register: () => () => {} },
     sessions: { binding: () => undefined },
     uiConversation: { interactions: { register: () => () => {} } },

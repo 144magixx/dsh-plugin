@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AskError, applyStreamFrame, normalizeImages, normalizeModel, normalizeQuestion, boundaryText, captureConfig, fence, foldMessages, forkSeed, normalizeAnswer, normalizeSelection, publicQuestions, titleFrom } from '../lib/context.js';
+import { toolFilePaths, AskError, applyStreamFrame, normalizeImages, normalizeModel, normalizeQuestion, boundaryText, captureConfig, fence, foldMessages, forkSeed, normalizeAnswer, normalizeSelection, publicQuestions, titleFrom } from '../lib/context.js';
 import { artifactDirectory, validateThread, SESSION_PREFIX, VIEW_WAIT_MAX_MS } from '../lib/service.js';
 import { readBody, routeHandler, BODY_DEADLINE_MS } from '../lib/index.js';
 
@@ -148,4 +148,15 @@ test('image uploads and model choices are validated', () => {
   assert.deepEqual(normalizeModel({ provider: 'p', model: 'm', reasoningEffort: 'high', extra: 1 }), { provider: 'p', model: 'm', reasoningEffort: 'high' });
   assert.equal(normalizeModel(undefined), undefined);
   assert.throws(() => normalizeModel({ provider: 'p' }), /model/);
+});
+
+test('file paths named by deliverable and edit tools become clickable references', () => {
+  assert.deepEqual(toolFilePaths('present', JSON.stringify({ files: [{ path: 'out/a.png', description: 'x' }, 'b.md'] })), ['out/a.png', 'b.md']);
+  assert.deepEqual(toolFilePaths('fs.write', { file_path: '/w/c.js' }), ['/w/c.js']);
+  assert.deepEqual(toolFilePaths('bash', { command: 'rm -rf /' }), []);
+  assert.deepEqual(toolFilePaths('present', '{bad json'), []);
+  const { messages } = foldMessages([
+    { type: 'assistant/message', seq: 1, data: { turn: 1, message: { content: [{ type: 'tool-call', id: 'c', name: 'present', arguments: '{"files":[{"path":"ledger.png"}]}' }, { type: 'text', text: '![图](ledger.png)' }] } } },
+  ]);
+  assert.deepEqual(messages[0].files, ['ledger.png']);
 });

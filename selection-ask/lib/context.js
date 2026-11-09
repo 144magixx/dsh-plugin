@@ -221,6 +221,26 @@ export function captureConfig(events = [], values = {}, fallback = {}) {
   };
 }
 
+const FILE_TOOLS = new Set(['present', 'write', 'edit', 'str_replace_editor', 'create_file', 'read_image', 'apply_patch']);
+/**
+ * File paths a tool call names (deliverables and edits), for clickable references.
+ * @param name - tool name, possibly namespaced.
+ * @param raw - JSON string or object arguments.
+ * @returns at most a few bounded path strings.
+ */
+export function toolFilePaths(name, raw) {
+  const tool = String(name ?? '').split(/[.:]/).at(-1);
+  if (!FILE_TOOLS.has(tool)) return [];
+  let args = raw;
+  if (typeof args === 'string') { try { args = JSON.parse(args); } catch { return []; } }
+  if (!args || typeof args !== 'object') return [];
+  const out = [];
+  const add = value => { if (typeof value === 'string' && value.trim() && value.length <= LIMITS.path && !/[\u0000-\u001f]/.test(value)) out.push(value.trim()); };
+  add(args.file_path); add(args.path); add(args.filePath);
+  if (Array.isArray(args.files)) for (const file of args.files.slice(0, 20)) add(typeof file === 'string' ? file : file?.path);
+  return out;
+}
+
 function textOf(content, type = 'text') {
   if (!Array.isArray(content)) return '';
   return content.filter(block => block?.type === type && typeof block.text === 'string').map(block => block.text).join('\n\n');
@@ -239,7 +259,7 @@ export function foldMessages(events, floor = 0) {
   let turnOpen = false;
   const ensureAssistant = (turn) => {
     if (!assistant || assistant.turn !== turn) {
-      assistant = { id: `a-${messages.length}`, role: 'assistant', turn, text: '', reasoning: false, tools: [], status: 'running' };
+      assistant = { id: `a-${messages.length}`, role: 'assistant', turn, text: '', reasoning: false, tools: [], files: [], status: 'running' };
       messages.push(assistant);
     }
     return assistant;
@@ -269,6 +289,7 @@ export function foldMessages(events, floor = 0) {
         for (const block of Array.isArray(content) ? content : []) {
           if (block?.type !== 'tool-call') continue;
           const tool = { id: String(block.id ?? ''), name: String(block.name ?? '') || 'tool', status: 'running' };
+          for (const path of toolFilePaths(block.name, block.arguments)) if (!target.files.includes(path) && target.files.length < LIMITS.tools) target.files.push(path);
           if (target.tools.length < LIMITS.tools) target.tools.push(tool);
           if (tool.id) tools.set(tool.id, tool);
         }
@@ -288,7 +309,7 @@ export function foldMessages(events, floor = 0) {
           if (reason.kind === 'error') assistant.error = clip(String(reason.error?.message ?? 'The model request failed.'), 1200);
           for (const tool of assistant.tools) if (tool.status === 'running') tool.status = 'stopped';
         } else if (reason.kind === 'error') {
-          messages.push({ id: `e-${event.seq}`, role: 'assistant', turn: data?.turn, text: '', reasoning: false, tools: [], status: 'error', error: clip(String(reason.error?.message ?? 'The model request failed.'), 1200) });
+          messages.push({ id: `e-${event.seq}`, role: 'assistant', turn: data?.turn, text: '', reasoning: false, tools: [], files: [], status: 'error', error: clip(String(reason.error?.message ?? 'The model request failed.'), 1200) });
         }
         assistant = null;
         break;

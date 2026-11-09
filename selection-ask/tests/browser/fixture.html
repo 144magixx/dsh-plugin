@@ -48,7 +48,7 @@ ok 23 tests passed</pre></div></div>
 </script>
 <script src="../../lib/client.js"></script>
 <script>
-  const stubReact = { createElement: () => null, Fragment: 'Fragment' }
+  const stubReact = { createElement: () => null, createContext: () => ({}), Fragment: 'Fragment' }
   window.saClient = window.__registration.factory((id) => { if (id === 'react') return stubReact; throw new Error(id) })
   const code = document.getElementById('code')
   for (let index = 1; index <= 60; index++) { const line = document.createElement('span'); line.className = 'line'; line.textContent = `const value${index} = compute(${index});`; code.append(line) }

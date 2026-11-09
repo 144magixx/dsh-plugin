@@ -157,3 +157,31 @@ test('model labels show name and effort', () => {
   assert.equal(client.modelLabel({ provider: 'p', model: 'gpt-x' }, t), 'gpt-x');
   assert.equal(client.modelLabel(null, t), 'modelDefault');
 });
+
+test('thread links resolve against the hidden thread cwd and open in the source conversation', () => {
+  assert.equal(client.sessionFileAddress('s 1', '/w/a b.png'), 'dsh-resource://file/session/s%201//w/a%20b.png');
+  assert.equal(client.resolvePath('/repo', './out/x.png'), '/repo/out/x.png');
+  assert.equal(client.resolvePath('/repo', '/abs/y.png'), '/abs/y.png');
+  assert.equal(client.resolvePath('C:\\repo', 'x.png'), 'C:\\repo\\x.png');
+  const opened = [];
+  const links = client.createLinks({ openResource: (address, options) => opened.push([address, options]), openExternal() {} }, 'src', '/repo', t);
+  const mention = links.mentions(['out/ledger.png']).resolve('ledger.png');
+  assert.equal(mention.title, '/repo/out/ledger.png');
+  mention.open();
+  return new Promise(resolve => setTimeout(() => {
+    assert.equal(opened[0][0], 'dsh-resource://file/session/src//repo/out/ledger.png');
+    assert.equal(links.mentions([]), undefined);
+    assert.equal(links.mentions(['a/x.png', 'b/x.png']).resolve('x.png'), undefined, 'ambiguous names stay plain');
+    resolve();
+  }, 0));
+});
+
+test('native MarkdownText receives the labels it dereferences for code blocks', () => {
+  const labels = client.markdownLabels(t);
+  assert.equal(typeof labels.code.copyLabel, 'string');
+  assert.equal(typeof labels.code.toolbarLabels.wrapLabel, 'string');
+  assert.equal(typeof labels.footnotes, 'string');
+  const links = client.createLinks({ openResource() {}, openExternal() {}, fileDrag: () => undefined }, 's', '/w', t);
+  assert.equal(typeof links.labels.code.copiedLabel, 'string');
+  assert.equal(typeof links.fileImages.fileDrag.prepare, 'function', 'images always get a drag service');
+});
