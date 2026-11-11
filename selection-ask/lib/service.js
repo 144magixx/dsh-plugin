@@ -39,6 +39,28 @@ const modelOptions = model => model ? { provider: model.provider, model: model.m
 const errorText = error => clip(String(error?.message ?? error ?? 'Unknown error'), 600);
 
 /**
+ * Select a Session-local model for the agent's next request.
+ * DSH >= 0.2.2 exposes `agent.model.select`; 0.2.1 records the choice through
+ * the session controller (`model/selection` event). Global defaults are untouched.
+ * @returns true when a selection was installed, false when this runtime offers neither.
+ */
+export function selectAgentModel(ctx, agent, model) {
+  if (typeof agent?.model?.select === 'function') { agent.model.select(model); return true; }
+  const controller = ctx.get?.('sessionController')?.agents;
+  if (typeof controller?.selectForNextRequest === 'function') { controller.selectForNextRequest(agent, model); return true; }
+  return false;
+}
+
+/** The agent's Session-local model choice ({provider, model, reasoningEffort?}) on DSH 0.2.1 and 0.2.2+, or undefined. */
+export function currentAgentModel(ctx, agent) {
+  try {
+    if (typeof agent?.model?.current === 'function') return agent.model.current() ?? undefined;
+    const current = ctx.get?.('sessionController')?.agents?.selectionFor?.(agent)?.current;
+    return current?.provider && current?.model ? current : undefined;
+  } catch { return undefined; }
+}
+
+/**
  * Owns hidden selection threads. Each thread is a persisted session with
  * `origin: 'subagent'` and no parent, so neither the workspace list nor a
  * parent's subagent catalog shows it; this plugin's table is its only index.
@@ -297,11 +319,7 @@ export class SelectionAskService {
     try { agent.inbox?.clear?.(); } catch {}
     const ctx = this.ctx;
     if (config.model) {
-      // Session-local selection (DSH >= 0.2.2); older hosts exposed selectForNextRequest.
-      try {
-        if (typeof agent.model?.select === 'function') agent.model.select(config.model);
-        else ctx.get?.('sessionController')?.agents?.selectForNextRequest?.(agent, config.model);
-      }
+      try { selectAgentModel(ctx, agent, config.model); }
       catch (error) { ctx.logger?.warn?.(`[selection-ask] model selection kept default: ${errorText(error)}`); }
     }
     const presets = ctx.get?.('permissionPresets');
@@ -314,7 +332,7 @@ export class SelectionAskService {
   async userMessage(agent, text, images = []) {
     let content = [...(text ? [{ type: 'text', text }] : []), ...images];
     if (images.length) {
-      const current = agent.model?.current?.();
+      const current = currentAgentModel(this.ctx, agent);
       if (current) {
         const info = await this.ctx.llm?.resolveModelInfo?.(current.provider, current.model).catch(() => undefined);
         if (info?.inputModalities && !info.inputModalities.includes('image')) throw new AskError('model-no-images', `Model "${info.name ?? current.model}" does not support image input.`, 409);
@@ -385,8 +403,7 @@ export class SelectionAskService {
     if (!model) throw new AskError('invalid-request', 'model is required.');
     await this.assertModel(model);
     const agent = await this.ensureAgent(record);
-    if (typeof agent.model?.select !== 'function') throw new AskError('unsupported-runtime', 'This DSH version cannot switch a session model.', 409);
-    agent.model.select(model);
+    if (!selectAgentModel(this.ctx, agent, model)) throw new AskError('unsupported-runtime', 'This DSH version cannot switch a session model.', 409);
     await this.table.put(record.id, { ...this.table.get(record.id), model, updatedAt: Date.now() });
     this.bump(record.id);
     return { model: this.describeModel(model, await this.catalog()) };
@@ -480,7 +497,7 @@ export class SelectionAskService {
     const running = agent?.status === 'running';
     const stream = running ? this.streams.get(record.sessionId) : undefined;
     let model = record.model ?? null;
-    try { model = agent?.model?.current?.() ?? model; } catch {}
+    if (agent) model = currentAgentModel(this.ctx, agent) ?? model;
     // Never let provider model listing delay a long-poll answer; names fill in on the next change.
     const catalog = this.catalogCache?.value;
     if (!catalog && !this.catalogLoading && !this.closed) void this.catalog().then(() => this.bump(record.id), () => {});

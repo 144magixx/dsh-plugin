@@ -2,8 +2,9 @@ import '../scripts/offline-test-guard.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { runtimeImport, installRuntimeResolution } from '../scripts/test-runtime.mjs';
+import { runtimeImport, runtimeFile, installRuntimeResolution } from '../scripts/test-runtime.mjs';
 import { workspace } from '../scripts/extract-test-runtime.mjs';
+import { selectAgentModel } from '../lib/service.js';
 
 installRuntimeResolution();
 const { Context } = await runtimeImport('@deepseek-ai/cordis');
@@ -48,6 +49,10 @@ export async function createIsolatedHost({ root, config = {}, plugin = true } = 
     if (fiber.state !== 2) throw new Error(`Could not mount ${name}: ${String(fiber.error ?? fiber._error)}; ${JSON.stringify(errors)}`);
     return fiber;
   }
+  async function installed(name) {
+    try { runtimeFile('@deepseek-ai/' + name); return true }
+    catch (error) { if (error.code === 'MODULE_NOT_FOUND') return false; throw error }
+  }
   const routes = new Map();
   let pluginFiber;
   async function mountPlugin() {
@@ -69,7 +74,8 @@ export async function createIsolatedHost({ root, config = {}, plugin = true } = 
     await mount('dsh-workspace');
     await mount('dsh-system-prompt', {});
     await mount('dsh-tools');
-    await mount('dsh-tool-executor-native');
+    // DSH 0.2.2 split tool execution into its own plugin; 0.2.1 has none.
+    if (await installed('dsh-tool-executor-native')) await mount('dsh-tool-executor-native');
     await mount('dsh-llm');
     ctx.llm.registerAdapter(['offline-test'], adapter);
     await mount('dsh-agent');
@@ -139,7 +145,7 @@ export async function createSource(h, prompts = ['Explain the limiter design.', 
   const { sessionId } = await h.ctx.sessionController.create({ cwd: h.cwd });
   const agent = h.ctx.agents.get(sessionId);
   await h.workspace.attachSession(sessionId);
-  agent.model.select({ provider: 'offline-test', model: 'source-model', reasoningEffort: 'high' });
+  selectAgentModel(h.ctx, agent, { provider: 'offline-test', model: 'source-model', reasoningEffort: 'high' });
   for (const text of prompts) await h.turn(agent, text);
   await h.ctx.sessions.flush(agent.session);
   return agent;

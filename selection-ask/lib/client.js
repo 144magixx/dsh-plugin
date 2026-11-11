@@ -1241,6 +1241,11 @@ window.__ModuleLoader__.load({
       } catch { return false }
     }
 
+    /** Whether the host offers native chat text interactions (DSH >= 0.2.2). */
+    function hasInteractions(ctx) {
+      try { return typeof ctx.uiConversation?.interactions?.register === 'function' } catch { return false }
+    }
+
     function apply(ctx) {
       ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), '[selection-ask] locale')
       const runtime = createRuntime(ctx)
@@ -1255,7 +1260,9 @@ window.__ModuleLoader__.load({
         return h('span', { className: 'sa-companion' }, h(NativeQuote, props), h(CompanionButton, { runtime, sessionId: props.sessionId, readText: props.readText, dismiss: props.dismiss, clearSelection: props.clearSelection }))
       })), '[selection-ask] quote companion')
       // When Quote is absent or declines (read-only conversations), open our own action.
-      ctx.effect(() => ctx.uiConversation.interactions.register({
+      // `uiConversation.interactions` ships from DSH 0.2.2. On 0.2.1 there is no native
+      // text-interaction source, so the document detector in the overlay covers chat text.
+      if (hasInteractions(ctx)) ctx.effect(() => ctx.uiConversation.interactions.register({
         id: KIND,
         onInteraction(request) {
           if (request.trigger !== 'selection' || request.readText() === null) return
@@ -1283,7 +1290,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale', 'sidebarRight', 'sidebarRightTabs', 'sessions', 'uiConversation'],
       apply,
       // Test surface.
-      parseFileAddress, baseName, clipSelection, selectionLabel, modelLabel, isComponent, MarkdownText, sessionFileAddress, resolvePath, createLinks, markdownLabels, linesAround, backoffDelay, relativeTime, placeNear, createApi, createFeed,
+      hasInteractions, parseFileAddress, baseName, clipSelection, selectionLabel, modelLabel, isComponent, MarkdownText, sessionFileAddress, resolvePath, createLinks, markdownLabels, linesAround, backoffDelay, relativeTime, placeNear, createApi, createFeed,
       injectBridge, injectBridgeText, selectionBridge, readDomSelection, createStore, sidebarContext, codeMirrorView, codeMirrorSelection, ZH, EN, CSS, MAX_TEXT, OPERATIONS,
     }
   },

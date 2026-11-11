@@ -1,6 +1,6 @@
 {
   "name": "dsh-selection-ask",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Selection Ask (划词提问): select text in the conversation or a sidebar file, code, Markdown, PDF or HTML preview and ask a hidden side question that never appears in the workspace list.",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,7 @@
     "./package.json": "./package.json"
   },
   "files": ["lib/index.js", "lib/service.js", "lib/context.js", "lib/client.js", "cordis.patch.yml", "locale", "icon.svg", "README.md", "LICENSE", "docs"],
-  "engines": {"node": ">=22"},
+  "engines": {"node": ">=22", "dsh": ">=0.2.1-rc.5 <0.3.0"},
   "scripts": {
     "test": "node --test tests/*.test.js",
     "test:integration": "node scripts/run-integration.mjs",

@@ -2,7 +2,7 @@
 
 在会话框或右侧栏文件中选中文字，点「划词提问」即可就这段内容提问。提问在一个**隐藏会话**里运行：继承当前会话的上下文、模型和权限，可以读写文件，但**不会出现在左侧工作区**。
 
-包名 `dsh-selection-ask`，版本 `0.1.0`，面向 DSH Desktop / Web GUI `0.2.2-rc.1`，Node.js 22+。零 npm 运行时依赖，无安装脚本，不启动额外服务器或后台进程。设计稿见 [selection-ask-design](../selection-ask-design/README.md)。
+包名 `dsh-selection-ask`，版本 `0.1.1`，支持 DSH Desktop / Web GUI `0.2.1-rc.5` 至 `0.2.x`（macOS 与 Windows），Node.js 22+。零 npm 运行时依赖，无安装脚本，不启动额外服务器或后台进程。设计稿见 [selection-ask-design](../selection-ask-design/README.md)。
 
 ## 怎么用
 
@@ -33,9 +33,18 @@
 - 界面靠长轮询刷新：每次请求最多等 **2.5 秒**（显著小于更新时宿主 10 秒的排空期限），请求体读取也有 2 秒硬上限，不存在永久响应。
 - 宿主锁定时新请求返回 503，客户端按 0.5 s → 15 s 有界退避；收起浮窗、关闭页签或停用插件后不再请求。停用插件会立即结束挂起的请求、取消待答的审批/提问并释放隐藏 Agent。
 
+## DSH 版本差异
+
+| 能力 | 0.2.2+ | 0.2.1（如 Windows Desktop 0.2.1-rc.5） |
+|---|---|---|
+| 会话正文入口 | 原生 `uiConversation.interactions` / `conversation.chat.text-interaction`，与「引用文本」并排 | 宿主没有这套接口；改由插件自己的选区检测在会话正文旁弹出「✦ 划词提问」 |
+| 按线程切换模型 | `agent.model.select` | 会话控制器的 `selectForNextRequest`（写入 `model/selection` 事件） |
+
+0.1.0 在 0.2.1 上无条件调用 `ctx.uiConversation.interactions.register`，抛出 `TypeError` 使整个客户端入口激活失败（`web boot: 1 entry did not activate / dsh-selection-ask: failed`）。这与 Windows 平台无关，macOS 上的 0.2.1 同样会失败；0.1.1 起按能力检测降级。
+
 ## 已知边界
 
-- 用户气泡、助手正文的入口复用原生 `conversation.chat.text-interaction` 插槽，与「引用文本」并排；停用插件即恢复原样。
+- 用户气泡、助手正文的入口在 0.2.2+ 复用原生 `conversation.chat.text-interaction` 插槽，与「引用文本」并排；停用插件即恢复原样。
 - HTML 预览运行在不透明源的 iframe 里：交互模式下，插件在渲染前往文档里插入一段选区桥接脚本（只发送选中文字、位置和所在章节）；静态模式下，插件把 iframe 的 `sandbox` 从空改为 `allow-same-origin`（**仍不允许脚本**，文档自带的 CSP 也保留），由父页面读取选区。该文档自己的脚本可以伪造选区消息，最多只会弹出一个提问按钮。
 - `dsh-better-sidebar` 的 HTML 预览默认是沙箱化的路由页面，插件不改写它；切到它的「关闭沙箱」模式后可划词，或用原生 HTML 预览。
 - 嵌入在右侧栏的会话（如岔路分支）里，工具输出等非正文区域的提问会归到当前主会话。

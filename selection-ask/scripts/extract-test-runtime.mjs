@@ -45,7 +45,11 @@ export function openArchive(filename = archivePath) {
   return { fd, header, lookup, read, close: () => fs.closeSync(fd) };
 }
 
-export function extractPackages(packageNames) {
+/**
+ * @param packageNames - packages every supported DSH release ships.
+ * @param optionalNames - packages only some releases ship (e.g. 0.2.2 added dsh-tool-executor-native); missing ones are reported, not fatal.
+ */
+export function extractPackages(packageNames, optionalNames = []) {
   const archive = openArchive();
   const copied = new Set();
   const missing = new Set();
@@ -86,6 +90,7 @@ export function extractPackages(packageNames) {
   }
   try {
     for (const name of packageNames) visit(name);
+    for (const name of optionalNames) visit(name, true);
     const manifest = { type: 'module', private: true, description: 'Isolated read-only copy of installed DSH test dependencies; never a profile' };
     fs.mkdirSync(runtimeDir, { recursive: true });
     fs.writeFileSync(path.join(runtimeDir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n');
