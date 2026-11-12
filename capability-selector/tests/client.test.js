@@ -100,6 +100,16 @@ test('busy composer retains selection; copying does not append', async () => {
   api.dispose();
 });
 
+test('hosts without whenDraftExists keep the draft and point to copying instead of reporting a busy composer', async () => {
+  // 0.2.1-rc.2 ignores `append` and answers 'preserved' while the composer already holds text.
+  const { api, calls } = harness({ append: () => 'preserved' });
+  api.open(); await tick(); api.toggle('a'); api.add();
+  assert.equal(api.getSnapshot().notice, 'unsupported'); assert.equal(api.getSnapshot().adding, false);
+  assert.equal(api.selected().length, 1); assert.equal(api.getSnapshot().open, true);
+  await api.copySelection(); assert.match(calls[0].copied, /digger-main/);
+  api.dispose();
+});
+
 test('late scans cannot cross sessions or replace newer scan results', async () => {
   const pending = [];
   const { api } = harness({ request: (_action, payload, signal) => new Promise(resolve => pending.push({ resolve, payload, signal })) });

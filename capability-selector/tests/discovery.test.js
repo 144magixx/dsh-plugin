@@ -4,8 +4,16 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { discoverCapabilities, createDiscoveryService, resolveSessionCwd, validateConfig, runReadOnlyCommand, LIMITS, safeText, parseCodexMcp } from '../lib/discovery.js';
+import { projectEntry, jsonMcpEntries } from '../lib/parsing.js';
 import { createFetchHandler, createCapabilityTool, profileMcpReader, runtimeSkillReader, errorResult } from '../lib/index.js';
 
+// Windows creates directory symlinks only with privileges; junctions need none and act the same here (the type is ignored elsewhere).
+const DIR_LINK = 'junction';
+const EXE = process.platform === 'win32' ? '.exe' : '';
+async function linkFile(target, file) {
+  try { await fs.symlink(target, file); return true; }
+  catch (error) { if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code)) return false; throw error; }
+}
 const skillText = (name = 'example', extra = '') => `---\nname: ${name}\ndescription: A useful local skill\n---\nRead this instruction.\n${extra}`;
 async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-capability-test-')));
@@ -27,7 +35,7 @@ async function fixture(t) {
   await fx.write('project/.dsh/skills/a/scripts/tool.js', 'version two');
   await fx.write('project/.agents/skills/a/SKILL.md', skillText('example', 'Different instructions.'));
   await fs.mkdir(path.join(fx.home, '.agents/skills'), { recursive: true });
-  await fs.symlink(path.dirname(a), path.join(fx.home, '.agents/skills/alias'), 'dir');
+  await fs.symlink(path.dirname(a), path.join(fx.home, '.agents/skills/alias'), DIR_LINK);
   const result = await fx.scan(); const skills = result.items.filter(item => item.kind === 'skill');
   assert.equal(skills.length, 3);
   const merged = skills.find(item => item.sources.length === 3);
@@ -51,8 +59,8 @@ test('symbolic link cycles, excessive resources and external references stay unm
   const fx = await fixture(t);
   const a = await fx.write('home/.codex/skills/one/SKILL.md', skillText());
   const b = await fx.write('home/.claude/skills/two/SKILL.md', skillText());
-  await fs.symlink(path.dirname(a), path.join(path.dirname(a), 'loop'), 'dir');
-  await fs.symlink(path.dirname(b), path.join(path.dirname(b), 'loop'), 'dir');
+  await fs.symlink(path.dirname(a), path.join(path.dirname(a), 'loop'), DIR_LINK);
+  await fs.symlink(path.dirname(b), path.join(path.dirname(b), 'loop'), DIR_LINK);
   await fx.write('home/.dsh/skills/deep/SKILL.md', skillText('deep'));
   await fx.write(`home/.dsh/skills/deep/${'sub/'.repeat(LIMITS.depth + 1)}data.txt`, 'resource');
   await fx.write('project/.agents/skills/one/SKILL.md', skillText('external', 'Load ../shared/tool.js'));
@@ -100,8 +108,8 @@ test('runtime-injected skills use exact resource directories and opaque provider
 });
 
 test('o2 aliases merge and catalog discovery only uses fixed read-only arguments', async t => {
-  const fx = await fixture(t); const entry = await fx.write('home/.local/bin/o2', '#!/bin/sh\nexit 0\n'); await fs.chmod(entry, 0o755);
-  await fs.symlink(entry, path.join(fx.home, '.local/bin/oxygen-cli'));
+  const fx = await fixture(t); const entry = await fx.write(`home/.local/bin/o2${EXE}`, '#!/bin/sh\nexit 0\n'); await fs.chmod(entry, 0o755);
+  await linkFile(entry, path.join(fx.home, `.local/bin/oxygen-cli${EXE}`));
   let calls = 0;
   const result = await fx.scan({ config: { cliCommands: ['o2', 'oxygen-cli', 'digger', 'jd-login'] }, runCommand: async (command, args) => { calls++; assert.equal(command, entry); assert.deepEqual(args, ['list', '--installed', '--json']); return { ok: true, stdout: JSON.stringify({ data: { items: [{ name: 'webcli:xingyun', description: 'Internal tools', installed: true, token: 'never-return' }, { name: 'available-only', installed: false }] } }) }; } });
   assert.equal(calls, 1); assert.equal(result.items.filter(item => item.name === 'o2').length, 1);
@@ -110,10 +118,38 @@ test('o2 aliases merge and catalog discovery only uses fixed read-only arguments
 });
 
 test('enterprise directory timeout/exit errors are partial and discovery can be disabled', async t => {
-  const fx = await fixture(t); const entry = await fx.write('home/.local/bin/o2', '#!/bin/sh\nexit 0\n'); await fs.chmod(entry, 0o755);
+  const fx = await fixture(t); const entry = await fx.write(`home/.local/bin/o2${EXE}`, '#!/bin/sh\nexit 0\n'); await fs.chmod(entry, 0o755);
   const result = await fx.scan({ config: { cliCommands: ['o2'] }, runCommand: async () => ({ ok: false, code: 'COMMAND_TIMEOUT', exitCode: null, stderr: 'token=hidden' }) });
   assert.equal(result.items[0].status, 'installed'); assert.ok(result.warnings.some(row => row.code === 'COMMAND_TIMEOUT')); assert.ok(!JSON.stringify(result).includes('hidden'));
   const disabled = await fx.scan({ config: { cliCommands: ['o2'], enableO2Discovery: false }, runCommand: () => { assert.fail('must not launch'); } }); assert.equal(disabled.complete, true);
+});
+
+test('Windows lookup honors PATHEXT, skips the npm POSIX shim, accepts quoted PATH entries and a mixed-case Path variable', async t => {
+  const fx = await fixture(t); const bin = path.join(fx.root, 'npm');
+  await fx.write('npm/o2', '#!/bin/sh\n'); const cmd = await fx.write('npm/o2.cmd', '@echo off\r\n'); await fx.write('npm/digger', '#!/bin/sh\n');
+  const result = await fx.scan({ platform: 'win32', config: { cliCommands: ['o2', 'digger'] }, env: { Path: `"${bin}"${path.delimiter}`, PATHEXT: '.EXE;.CMD' }, runCommand: async () => assert.fail('a .cmd shim is never launched without a shell') });
+  const o2 = result.items.find(item => item.name === 'o2'); assert.equal(o2.status, 'installed'); assert.equal(o2.sources[0].path, await fs.realpath(cmd));
+  assert.equal(result.items.find(item => item.name === 'digger').status, 'missing', 'an extensionless shim is not an executable on Windows');
+  assert.ok(result.warnings.some(row => row.code === 'O2_LAUNCH_UNSUPPORTED'));
+});
+
+test('POSIX lookup still requires the execute bit and ignores PATHEXT', async t => {
+  if (process.platform === 'win32') return t.skip('POSIX permission semantics');
+  const fx = await fixture(t); const plain = await fx.write('bin/o2.cmd', 'x'); await fs.chmod(plain, 0o644); const run = await fx.write('bin/o2', '#!/bin/sh\n'); await fs.chmod(run, 0o644);
+  const missing = await fx.scan({ platform: 'linux', config: { cliCommands: ['o2'] }, env: { PATH: path.dirname(run), PATHEXT: '.CMD' } });
+  assert.equal(missing.items[0].status, 'missing'); await fs.chmod(run, 0o755);
+  const found = await fx.scan({ platform: 'linux', config: { cliCommands: ['o2'], enableO2Discovery: false }, env: { PATH: path.dirname(run), PATHEXT: '.CMD' } });
+  assert.equal(found.items[0].status, 'installed');
+});
+
+test('Claude project entries match Windows session directories written with forward slashes', async t => {
+  assert.equal(projectEntry({ 'C:/Users/me/app': 1 }, 'C:\\Users\\me\\app'), 1);
+  assert.equal(projectEntry({ 'c:/users/me/app/': 2 }, 'C:\\Users\\me\\app'), 2);
+  assert.equal(projectEntry({ '/home/me/app': 3 }, '/home/me/app'), 3);
+  assert.equal(projectEntry({ '/home/me/app': 3 }, '/home/ME/app'), undefined, 'POSIX paths stay case-sensitive');
+  assert.equal(projectEntry({ '/home/me/a/b': 4 }, '/home/me/a\\b'), undefined, 'a backslash is a legal POSIX file-name character');
+  const entries = jsonMcpEntries({ projects: { 'C:/Users/me/app': { mcpServers: { local: { command: 'x' } }, disabledMcpServers: ['local'] } } }, 'C:\\Users\\me\\app');
+  assert.equal(entries.length, 1); assert.equal(entries[0].config.disabled, true);
 });
 
 test('real subprocess wrapper handles timeout, exit codes, output bounds and cancellation', { timeout: 5000 }, async () => {
@@ -125,7 +161,7 @@ test('real subprocess wrapper handles timeout, exit codes, output bounds and can
 
 test('configuration rejects shell fragments, relative roots and wrong types', () => {
   for (const config of [{ cliCommands: ['o2 --help'] }, { cliCommands: ['../o2'] }, { cliCommands: ['$(echo secret)'] }, { extraSkillRoots: ['relative'] }, { extraSkillRoots: [42] }, { cacheTtlMs: 0 }, { enableO2Discovery: 'true' }, { unknown: true }]) assert.throws(() => validateConfig(config), { code: 'INVALID_CONFIG' });
-  assert.equal(validateConfig({ extraSkillRoots: ['~/skills'] }, '/example').extraSkillRoots[0], '/example/skills');
+  assert.equal(validateConfig({ extraSkillRoots: ['~/skills'] }, path.resolve('/example')).extraSkillRoots[0], path.resolve('/example', 'skills'));
 });
 
 test('current session cwd follows durable changes; observation always disposes', async t => {

@@ -424,6 +424,56 @@ test('plugin apply registers one shared service, projection, tool and streaming 
   assert.equal(domainClosed, true);
 });
 
+for (const [label, legacy] of [['0.2.2 awaited handle', false], ['0.2.1 disposer-only registration', true]]) {
+  test(`plugin apply reads projection state through the ${label}`, async t => {
+    const h = harness(t, { cold: false });
+    const effects = [], handleReads = [], registryReads = [];
+    Object.assign(h.ctx, {
+      storageDomain: { async open() { return { table: () => h.table, async close() {} }; } },
+      provide() {}, effect(factory) { effects.push(factory()); },
+      connection: { fetch: { register() {} } }, tools: { register() {} },
+    });
+    const registryStateOf = h.ctx.sessionProjections.stateOf;
+    h.ctx.sessionProjections.stateOf = (session, key) => { registryReads.push(key); return registryStateOf(session, key); };
+    h.ctx.sessionProjections.onChanged = () => {};
+    // 0.2.2 returns a callable thenable resolving to a handle; 0.2.1 returns a plain disposer.
+    h.ctx.sessionProjections.register = () => {
+      const dispose = () => {};
+      if (legacy) return dispose;
+      const handle = { stateOf: session => { handleReads.push(session.id); return registryStateOf(session, projectionDefinition.key); } };
+      return Object.assign(dispose, { then: (resolve, reject) => Promise.resolve(handle).then(resolve, reject) });
+    };
+    let provided;
+    h.ctx.provide = (_key, value) => { provided = value; };
+    await apply(h.ctx, { autoSummarize: false, initialSummaries: 0 });
+    t.after(async () => { for (const cleanup of effects.toReversed()) await cleanup(); });
+    await provided.ready;
+    const row = (await provided.get({ sessionId: 's1' })).item;
+    assert.equal(row.latestQuestion, '自由意志与道德责任有什么关系？');
+    if (legacy) { assert.equal(handleReads.length, 0); assert.ok(registryReads.length > 0); }
+    else { assert.ok(handleReads.length > 0); assert.equal(registryReads.length, 0, 'deprecated registry stateOf must not be used'); }
+  });
+}
+
+test('a rejected projection registration falls back to registry reads and keeps the plugin active', async t => {
+  const h = harness(t);
+  const effects = [], warnings = [];
+  let provided;
+  Object.assign(h.ctx, {
+    storageDomain: { async open() { return { table: () => h.table, async close() {} }; } },
+    provide: (_key, value) => { provided = value; }, effect(factory) { effects.push(factory()); },
+    connection: { fetch: { register() {} } }, tools: { register() {} }, logger: { warn: message => warnings.push(message) },
+  });
+  h.ctx.sessionProjections.onChanged = () => {};
+  h.ctx.sessionProjections.register = () => Promise.reject(new Error('key conflict'));
+  await apply(h.ctx, { autoSummarize: false, initialSummaries: 0 });
+  t.after(async () => { for (const cleanup of effects.toReversed()) await cleanup(); });
+  await provided.ready;
+  assert.equal(provided.projection, null);
+  assert.match(warnings[0], /key conflict/);
+  assert.equal((await provided.get({ sessionId: 's1' })).item.sessionId, 's1');
+});
+
 test('full queue rejects extra manual work while raw session details remain readable', async t => {
   const h = harness(t, { ids: ['a', 'b', 'c'], config: { maxQueue: 1 } });
   await h.service.refresh({ sessionId: 'a' });

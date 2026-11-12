@@ -13,12 +13,17 @@ import { workspace } from './extract-test-runtime.mjs';
 
 await import('./build-preview.mjs');
 const flag = process.argv.indexOf('--browser');
+// Same browsers as scripts/preview.mjs: Windows commonly has only Edge, and 32-bit installs live under ProgramFiles(x86).
+const windowsRoots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA].filter(Boolean);
 const browser = (flag >= 0 ? process.argv[flag + 1] : undefined) ?? process.env.CHROME_PATH ?? [
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/usr/bin/google-chrome', '/usr/bin/chromium',
-  process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'Google/Chrome/Application/chrome.exe'),
-  process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe'),
-].filter(Boolean).find(file => fs.existsSync(file));
+  ...['/Applications', path.join(os.homedir(), 'Applications')].flatMap(root => [
+    path.join(root, 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'),
+    path.join(root, 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+    path.join(root, 'Microsoft Edge.app', 'Contents', 'MacOS', 'Microsoft Edge'),
+  ]),
+  '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium',
+  ...windowsRoots.flatMap(root => [path.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'), path.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe')]),
+].find(file => fs.existsSync(file));
 if (!browser) throw new Error('Set CHROME_PATH or pass --browser to Chrome/Chromium/Edge.');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'dss-browser-test-'));
 const child = spawn(browser, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-extensions', '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -176,5 +181,6 @@ try {
   // Only the exact temporary directory created above is eligible for deletion.
   const resolved = fs.realpathSync(profile);
   if (resolved !== path.join(fs.realpathSync(os.tmpdir()), path.basename(profile)) || !path.basename(resolved).startsWith('dss-browser-test-')) throw new Error('Unexpected browser profile path');
-  fs.rmSync(resolved, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  // Windows keeps profile files locked for a moment after Chrome exits.
+  fs.rmSync(resolved, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }

@@ -4,6 +4,7 @@ import { diagramType, validateSource } from './parse.mjs';
 import { setRenderRoot } from './render-scope.mjs';
 import { mermaidConfig, typeName } from './palette.mjs';
 import { iconSvg } from './icons.mjs';
+import { zoomAction } from './keys.mjs';
 import css from './style.css';
 
 const h = React.createElement;
@@ -234,9 +235,12 @@ function Expanded({ entry, title, t, onClose, onDownload }) {
   };
   const keys = event => {
     if (event.target.closest?.('.dshmd-menu')) return;
-    if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomCenter(1.25); }
-    else if (event.key === '-' || event.key === '_') { event.preventDefault(); zoomCenter(0.8); }
-    else if (event.key === '0') { event.preventDefault(); fit(); }
+    const action = zoomAction(event);
+    if (!action) return;
+    event.preventDefault();
+    if (action === 'in') zoomCenter(1.25);
+    else if (action === 'out') zoomCenter(0.8);
+    else fit();
   };
   return h('dialog', { ref: dialogRef, className: 'dshmd-dialog', 'aria-label': title, onCancel: onClose, onClose, onKeyDown: keys },
     h('div', { className: 'dshmd-head dshmd-dialog-head' },

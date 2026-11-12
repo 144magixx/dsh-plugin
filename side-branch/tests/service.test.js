@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { SideBranchService } from '../lib/service.js';
 import { routeHandler } from '../lib/index.js';
 
-function fixture({ failModel = false, failCreate = false, failFlush = false } = {}) {
+function fixture({ failModel = false, failCreate = false, failFlush = false, modelApi = 'legacy' } = {}) {
   const events = [
     ['permission/preset', { preset: 'workspace-write' }], ['sandbox/mode', { mode: 'workspace-write' }], ['approval/policy', { policy: 'ask' }],
     ['model/selection', { provider: 'test', model: 'selected', reasoningEffort: 'high' }], ['session/title', { title: 'Source' }],
@@ -20,7 +20,7 @@ function fixture({ failModel = false, failCreate = false, failFlush = false } = 
     if (failCreate) throw new Error('native create failed');
     const id = `child-${sessions.size}`; const seed = atSeq === null ? [] : structuredClone(events.slice(0, atSeq + 1));
     const session = { ...source, id, header: { ...source.header, id, parentSession: 'source' }, events: seed, inheritedEventCount: seed.length };
-    const agent = { id, session, inbox: { clear() {} }, status: 'idle', inject(message) { calls.injected++; session.append('agent/inbox/spliced', { target: 'next-step', messages: [message] }); } };
+    const agent = { id, session, inbox: { clear() {} }, status: 'idle', ...(modelApi === 'modern' ? { model: { select(model) { session.append('model/selection', model); } } } : {}), inject(message) { calls.injected++; session.append('agent/inbox/spliced', { target: 'next-step', messages: [message] }); } };
     sessions.set(id, session); agents.set(id, agent); service.onCreated({ agent });
     assert.deepEqual(await service.guard({ agent }, () => ({ kind: 'enter' })), { kind: 'reject' });
     return { sessionId: id };
@@ -34,7 +34,7 @@ function fixture({ failModel = false, failCreate = false, failFlush = false } = 
       async fork({ atSeq }) { calls.fork++; return mint(atSeq); }, async create() { calls.create++; return mint(null); },
       async resolveAgent(id) { calls.resolved.push(id); return { agent: agents.get(id) }; },
       async rename({ sessionId, title }) { sessions.get(sessionId).append('session/title', { title }); },
-      agents: { selectForNextRequest(agent, model) { agent.session.append('model/selection', model); } }
+      ...(modelApi === 'legacy' ? { agents: { selectForNextRequest(agent, model) { agent.session.append('model/selection', model); } } } : {})
     },
     permissionPresets: { current: () => 'workspace-write', set(session, preset) { session.append('permission/preset', { preset }); } },
     approval: { config: { policy: 'never' } },
@@ -121,4 +121,18 @@ test('HTTP shape rejects malformed, oversized and non-JSON bodies without invoki
   assert.equal((await (await handler(req('[]'))).json()).code, 'invalid-request');
   assert.equal((await (await handler(req('{'))).json()).code, 'invalid-request');
   assert.equal(called, 0);
+});
+test('model selection works through agent.model.select (DSH >= 0.2.2) without the 0.2.1 session-controller entry point', async () => {
+  const f = fixture({ modelApi: 'modern' });
+  assert.equal(f.ctx.sessionController.agents, undefined);
+  const { branch } = await f.service.create(request);
+  const child = f.agents.get(branch.sessionId);
+  assert.equal(branch.ready, true);
+  assert.equal(child.session.events.findLast(e => e.type === 'model/selection').data.model, 'selected');
+});
+test('a host with neither model selection interface fails the branch cleanly instead of using a default model', async () => {
+  const f = fixture({ modelApi: 'none' });
+  await assert.rejects(f.service.create(request), e => e.code === 'unsupported-runtime');
+  assert.equal(f.records.get(request.requestId).state, 'failed');
+  assert.ok(f.ctx.workspaceRegistry.archivedSessionIds.includes(f.records.get(request.requestId).sessionId));
 });

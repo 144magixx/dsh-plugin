@@ -45,7 +45,8 @@ export function openArchive(filename = archivePath) {
   return { fd, header, lookup, read, close: () => fs.closeSync(fd) };
 }
 
-export function extractPackages(packageNames) {
+/** Copy packages (and their dependency closure) out of the ASAR; `optionalPackages` that this DSH version lacks are skipped. */
+export function extractPackages(packageNames, optionalPackages = []) {
   const archive = openArchive();
   const copied = new Set();
   const missing = new Set();
@@ -86,6 +87,7 @@ export function extractPackages(packageNames) {
   }
   try {
     for (const name of packageNames) visit(name);
+    for (const name of optionalPackages) visit(name, true);
     const manifest = { type: 'module', private: true, description: 'Isolated read-only copy of installed DSH test dependencies; never a profile' };
     fs.mkdirSync(runtimeDir, { recursive: true });
     fs.writeFileSync(path.join(runtimeDir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n');

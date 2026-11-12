@@ -83,6 +83,19 @@ window.__ModuleLoader__.load({
 
     // ---- Pure helpers (exported for tests) ---------------------------------------
 
+    /** Cmd on macOS, Ctrl elsewhere; the handler accepts either modifier. */
+    function isMacPlatform(nav = typeof navigator === 'undefined' ? undefined : navigator) {
+      const platform = nav?.userAgentData?.platform || nav?.platform || nav?.userAgent || ''
+      return /mac|iphone|ipad/i.test(platform)
+    }
+
+    function shortcutLabel(action, mac) {
+      if (action === 'undo') return mac ? '⌘Z' : 'Ctrl+Z'
+      if (action === 'redo') return mac ? '⇧⌘Z' : 'Ctrl+Y'
+      if (action === 'save') return mac ? '⌘S' : 'Ctrl+S'
+      return ''
+    }
+
     function replaceError(code) {
       const error = new Error(code)
       error.code = code
@@ -719,6 +732,7 @@ window.__ModuleLoader__.load({
       const gesture = useRef(null)
       const idSeq = useRef(0)
       const frame = useRef(0)
+      const mac = isMacPlatform()
 
       const width = image?.naturalWidth || 1
       const height = image?.naturalHeight || 1
@@ -1064,13 +1078,13 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dia-heading' },
             h('span', { className: 'dia-title' }, t('title')),
             h('span', { className: 'dia-sub', title: file.name }, [file.name, t('subtitle')].filter(Boolean).join(' · '))),
-          h('button', { type: 'button', className: 'dia-btn', title: `${t('undo')} (⌘/Ctrl+Z)`, 'aria-label': t('undo'), disabled: saving || doc.past.length === 0, onClick: undo, 'data-action': 'undo' }, h(Icon, { name: 'undo' })),
-          h('button', { type: 'button', className: 'dia-btn', title: `${t('redo')} (⇧⌘/Ctrl+Shift+Z)`, 'aria-label': t('redo'), disabled: saving || doc.future.length === 0, onClick: redo, 'data-action': 'redo' }, h(Icon, { name: 'redo' })),
+          h('button', { type: 'button', className: 'dia-btn', title: `${t('undo')} (${shortcutLabel('undo', mac)})`, 'aria-label': t('undo'), disabled: saving || doc.past.length === 0, onClick: undo, 'data-action': 'undo' }, h(Icon, { name: 'undo' })),
+          h('button', { type: 'button', className: 'dia-btn', title: `${t('redo')} (${shortcutLabel('redo', mac)})`, 'aria-label': t('redo'), disabled: saving || doc.future.length === 0, onClick: redo, 'data-action': 'redo' }, h(Icon, { name: 'redo' })),
           h('button', { type: 'button', className: 'dia-btn', title: `${t('remove')} (Delete)`, 'aria-label': t('remove'), disabled: saving || !selectedShape || tool !== 'select', onClick: removeSelected, 'data-action': 'remove' }, h(Icon, { name: 'remove' })),
           h('button', { type: 'button', className: 'dia-btn', title: t('clear'), 'aria-label': t('clear'), disabled: saving || doc.shapes.length === 0, onClick: clearAll, 'data-action': 'clear' }, h(Icon, { name: 'clear' })),
           h('span', { className: 'dia-sep' }),
           h('button', { type: 'button', className: 'dia-btn dia-text-btn', disabled: saving, onClick: requestClose, 'data-action': 'cancel' }, t('cancel')),
-          h('button', { type: 'button', className: 'dia-btn dia-text-btn dia-primary', title: `${t('save')} (⌘/Ctrl+S)`, disabled: saving || !image, onClick: save, 'data-action': 'save' }, saving ? t('saving') : t('save'))),
+          h('button', { type: 'button', className: 'dia-btn dia-text-btn dia-primary', title: `${t('save')} (${shortcutLabel('save', mac)})`, disabled: saving || !image, onClick: save, 'data-action': 'save' }, saving ? t('saving') : t('save'))),
         h('div', { ref: stageRef, className: 'dia-stage' },
           status && h('div', { className: 'dia-status', 'data-kind': status.kind, role: status.kind === 'error' ? 'alert' : 'status' }, status.text),
           failed ? h('div', { className: 'dia-status', 'data-kind': 'error', role: 'alert' }, t('loadFailed'))
@@ -1117,7 +1131,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       apply,
       // Test surface.
-      outputType, outputName, planReplace, targetId, unitFor, sizeValue, restyle, nextMarkerNumber, constrain, distToSegment,
+      isMacPlatform, shortcutLabel, outputType, outputName, planReplace, targetId, unitFor, sizeValue, restyle, nextMarkerNumber, constrain, distToSegment,
       textLayout, shapeBounds, hitTest, pick, translate, isMeaningful, luminance, history, pushHistory, undoHistory, redoHistory,
       findThumbnail, registerReplacement, ZH, EN, TOOLS, COLORS, SLOT, OWN_ID,
     }

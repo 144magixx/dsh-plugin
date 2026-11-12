@@ -103,6 +103,17 @@ export function parseCodexMcp(raw) {
   return { servers: [...servers].map(([name, config]) => ({ name, config })), unsupported };
 }
 
+/** Claude Code keys Windows projects with forward slashes ("C:/Users/me/app"); match either spelling of a Windows session directory. */
+export function projectEntry(projects, cwd) {
+  if (!projects || typeof projects !== 'object' || Array.isArray(projects) || typeof cwd !== 'string' || !cwd) return undefined;
+  if (Object.hasOwn(projects, cwd)) return projects[cwd];
+  if (!/^[A-Za-z]:[\\/]|^\\\\/.test(cwd)) return undefined;
+  const normal = text => text.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const wanted = normal(cwd);
+  const key = Object.keys(projects).find(name => normal(name) === wanted);
+  return key === undefined ? undefined : projects[key];
+}
+
 export function jsonMcpEntries(value, cwd) {
   const result = [];
   function add(mapping) {
@@ -110,7 +121,7 @@ export function jsonMcpEntries(value, cwd) {
     for (const [name, config] of Object.entries(mapping)) if (config && typeof config === 'object' && !Array.isArray(config)) result.push({ name, config });
   }
   add(value?.mcpServers); add(value?.mcp_servers);
-  const project = cwd ? value?.projects?.[cwd] : undefined;
+  const project = projectEntry(value?.projects, cwd);
   add(project?.mcpServers);
   const disabled = new Set([...(Array.isArray(value?.disabledMcpServers) ? value.disabledMcpServers : []), ...(Array.isArray(project?.disabledMcpServers) ? project.disabledMcpServers : [])]);
   return result.map(row => disabled.has(row.name) ? { ...row, config: { ...row.config, disabled: true } } : row);

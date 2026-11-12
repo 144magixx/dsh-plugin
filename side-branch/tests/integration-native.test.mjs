@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, stat } from 'node:fs/promises';
-import { createIsolatedHost } from './integration-host.mjs';
+import { createIsolatedHost, selectModel } from './integration-host.mjs';
 import { NOTE_SOURCE } from '../lib/history.js';
 
 async function source(h) {
@@ -10,7 +10,7 @@ async function source(h) {
   const agent = h.ctx.agents.get(sessionId);
   await h.workspace.attachSession(sessionId);
   await h.ctx.sessionController.rename({ sessionId, title: 'Five-turn source' });
-  h.ctx.sessionController.agents.selectForNextRequest(agent, { provider: 'offline-test', model: 'source-model', reasoningEffort: 'high' });
+  selectModel(h.ctx, agent, { provider: 'offline-test', model: 'source-model', reasoningEffort: 'high' });
   agent.session.append('sandbox/mode', { mode: 'read-only' });
   const prompts = ['Remember the first requirements.', 'Use Python to implement a limiter.', 'Secret excluded turn ZEBRA-42.', 'Continue implementation.', 'Finish implementation.'];
   for (const text of prompts) await h.turn(agent, text);
@@ -32,7 +32,8 @@ test('actual native fork keeps prefix, current model and permissions, and source
     const [first, repeated] = await Promise.all([h.ctx.sideBranch.create(args), h.ctx.sideBranch.create(args)]);
     assert.equal(first.branch.sessionId, repeated.branch.sessionId);
     const b = h.ctx.agents.get(first.branch.sessionId);
-    assert.equal(b.session.header.parentSession, a.id);
+    // DSH 0.2.1 stamps native fork lineage; 0.2.2 no longer does. Nothing in the plugin depends on it.
+    if (b.session.header.parentSession !== undefined) assert.equal(b.session.header.parentSession, a.id);
     assert.equal(b.session.header.cwd, a.session.header.cwd);
     assert.deepEqual(b.session.snapshotEvents().slice(0, first.branch.inheritedEventCount), a.session.snapshotEvents().slice(0, first.branch.inheritedEventCount));
     assert.equal(first.branch.originalPrompt, 'Use Python to implement a limiter.');

@@ -65,7 +65,9 @@ export class NavigatorService {
     this.listeners = new Set(); this.revision = 0; this.watchEpoch = randomUUID(); this.closed = false; this.lifetime = new AbortController();
     this.catalogAt = 0; this.catalogPromise = null; this.ready = null;
     this.failures = 0; this.cooldownUntil = 0; this.cooldownTimer = null;
+    this.projection = null; // 0.2.2 registration handle; absent on 0.2.1
   }
+  projectionState(session) { return this.projection ? this.projection.stateOf(session) : this.ctx.sessionProjections.stateOf(session, projectionDefinition.key); }
   cache(id) { return this.table.get(id) ?? emptyCache(); }
   changed(sessionId) { const frame = { revision: ++this.revision, ...(sessionId ? { sessionId } : {}) }; for (const fn of this.listeners) { try { fn(frame); } catch {} } }
   subscribe(fn) { if (this.closed) throw new NavigatorError('unloading', 'Plugin is unloading.', 503); this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -86,7 +88,7 @@ export class NavigatorService {
     const live = this.ctx.sessions.get(id);
     if (live) {
       if (live.header.origin === 'subagent') throw new NavigatorError('unsupported-session', 'Choose an ordinary session.');
-      const state = this.ctx.sessionProjections.stateOf(live, projectionDefinition.key);
+      const state = this.projectionState(live);
       if (state) { this.states.set(id, state); this.headers.set(id, live.header); return state; }
     }
     if (this.states.has(id)) return this.states.get(id);
@@ -183,7 +185,7 @@ export class NavigatorService {
   }
   onProjection(session, key) {
     if (this.closed || key !== projectionDefinition.key || session.header.origin === 'subagent') return;
-    const state = this.ctx.sessionProjections.stateOf(session, key); if (!state) return;
+    const state = this.projectionState(session); if (!state) return;
     const old = this.states.get(session.id);
     this.headers.set(session.id, session.header); this.states.set(session.id, state); this.catalogAt = 0;
     this.changed(session.id);

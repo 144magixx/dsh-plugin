@@ -108,9 +108,18 @@ window.__ModuleLoader__.load({
         ...(cursor ? { cursor } : {}), limit: 40,
       }
     }
-    function shortcutGesture(event) {
-      return !event.isComposing && !event.repeat && !event.altKey &&
-        Boolean(event.metaKey) !== Boolean(event.ctrlKey) &&
+    // Web fallback only: Cmd on macOS, Ctrl elsewhere, so Ctrl+F stays Emacs-style forward-char on macOS.
+    // Without a known platform either single modifier is accepted.
+    function webPlatform(service) {
+      if (typeof service?.platform === 'string') return service.platform
+      const device = String(globalThis.navigator?.platform ?? '')
+      return device ? (/darwin|mac|iphone|ipad/i.test(device) ? 'macos' : 'other') : undefined
+    }
+    function shortcutGesture(event, platform) {
+      const meta = Boolean(event.metaKey)
+      const ctrl = Boolean(event.ctrlKey)
+      const primary = platform === undefined ? meta !== ctrl : platform === 'macos' ? meta && !ctrl : ctrl && !meta
+      return !event.isComposing && !event.repeat && !event.altKey && primary &&
         (event.code === 'KeyF' || event.key?.toLowerCase() === 'f')
     }
     function errorOf(error) {
@@ -503,8 +512,9 @@ window.__ModuleLoader__.load({
       }
       // DSH's configurable registry disallows plain primary+F on Web.
       if (!service || service.runtime === 'web') {
+        const platform = webPlatform(service)
         const keydown = event => {
-          if (event.defaultPrevented || !shortcutGesture(event)) return
+          if (event.defaultPrevented || !shortcutGesture(event, platform)) return
           const modal = document.querySelector('[role="dialog"][aria-modal="true"]')
           if (modal && modal.dataset.shortcutModal !== 'dsh-session-search') return
           event.preventDefault(); event.stopPropagation()
@@ -539,6 +549,6 @@ window.__ModuleLoader__.load({
     }
     return { name: NAME, inject: ['slots', 'locale', 'sessions', 'uiWorkspace'], apply,
       createController, createStore, currentSessionId, navigationTarget, mergeResults, highlightParts, searchPayload,
-      shortcutGesture, requestJSON, installShortcuts, resultKey, ZH, EN, CSS }
+      shortcutGesture, webPlatform, requestJSON, installShortcuts, resultKey, ZH, EN, CSS }
   },
 })

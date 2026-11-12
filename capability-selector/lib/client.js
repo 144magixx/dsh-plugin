@@ -320,7 +320,8 @@ window.__ModuleLoader__.load({
         try {
           const result = append(binding, buildSelectionText(items))
           if (result === 'applied') { store.set({ open: false, notice: t('added'), adding: false }); return }
-          store.set({ notice: t(result === 'unsupported' ? 'unsupported' : 'blocked'), adding: false })
+          // Hosts before `whenDraftExists` (0.2.1-rc.2) ignore `append` and report 'preserved' for a non-empty draft: nothing was written, so offer the copy path instead of a misleading "busy".
+          store.set({ notice: t(result === 'unsupported' || result === 'preserved' ? 'unsupported' : 'blocked'), adding: false })
         } catch (error) { store.set({ notice: errorText(error), adding: false }) }
       }
       async function copySelection() {

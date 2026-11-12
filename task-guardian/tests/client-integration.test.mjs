@@ -161,6 +161,11 @@ async function fixture() {
     ctx.provide('connection', {});
     let releaseShell = declareShell();
     await mount('@deepseek-ai/dsh-client-ui-conversation');
+    // DSH 0.2.2+ sidebar-right injects `contextMenus`, owned by a package absent from 0.2.1. The real one needs
+    // document listeners this DOM-free fixture forbids, so provide an inert face only when the host ships it.
+    if (client.archive.lookup('dsh/node_modules/@deepseek-ai/dsh-client-ui-context-menu')) {
+      ctx.provide('contextMenus', { register: () => () => {}, active: observable(undefined, subscriptions), open: forbid('open context menu') });
+    }
     await mount('@deepseek-ai/dsh-client-ui-sidebar-right');
     let releaseAccessoryOwner;
     const mountAccessoryOwner = () => {

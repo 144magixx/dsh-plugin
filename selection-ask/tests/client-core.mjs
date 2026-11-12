@@ -11,7 +11,7 @@ let registration;
 runInNewContext(source, {
   window: { __ModuleLoader__: { load(value) { registration = value; } } },
   URL, URLSearchParams, AbortController, AbortSignal, TextEncoder, TextDecoder, console, setTimeout, clearTimeout,
-  crypto: globalThis.crypto,
+  crypto: globalThis.crypto, fetch: globalThis.fetch,
 }, { filename: 'dsh-selection-ask/client.js', timeout: 1000 });
 if (registration?.id !== 'dsh-selection-ask') throw new Error('Unexpected Client module registration');
 const ReactStub = Object.freeze({ createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), createContext: (value) => ({ Provider: 'Provider', _default: value }), Fragment: 'Fragment' });

@@ -11,6 +11,7 @@ const runtime = createRequire(path.join(here, '../scripts/.runtime/package.json'
 const native = name => import(pathToFileURL(runtime.resolve('@deepseek-ai/' + name)).href);
 const { Context } = await native('cordis');
 const { createUserMessage } = await native('dsh-llm');
+const { Session, SESSION_FORMAT_VERSION } = await native('dsh-session');
 
 test('native Cordis + Session Query + JSONL: search persisted history, live tail, route, tool and unload', { timeout: 30000 }, async () => {
   const testRoot = path.resolve(here, '.integration-data');
@@ -40,7 +41,9 @@ test('native Cordis + Session Query + JSONL: search persisted history, live tail
     const workspace = await ctx.workspaceRegistry.create(root, 'Search integration workspace');
     const routes = new Map();
     ctx.provide('connection', { fetch: { register(route) { routes.set(route.path, route); return () => routes.delete(route.path); } } });
-    const source = ctx.sessions.prepare('search-integration-history', { meta: { cwd: root, createdAt: 1 } });
+    // 0.2.2 makes prepare()d sessions read-only until announced; an independent
+    // detached Session (same constructor on 0.2.1) is writable on every version.
+    const source = Session.create('search-integration-history', undefined, { version: SESSION_FORMAT_VERSION, id: 'search-integration-history', createdAt: 1, cwd: root, isSeeded: false });
     const first = source.append('user/message', createUserMessage({ content: [{ type: 'text', text: '历史查询中文片段与 FooBar[0].value' }], source: { kind: 'user' } }), { surfaceOp: 'append' });
     source.append('session/title', { title: '历史搜索标题', messageSeqs: [], source: { kind: 'user' } });
     const handle = await ctx.sessionPersistence.create(source.header);
@@ -84,7 +87,8 @@ test('native Cordis + Session Query + JSONL: search persisted history, live tail
     await ctx.fiber.dispose();
     assert.equal(path.dirname(path.resolve(root)), testRoot);
     assert.match(path.basename(root), /^[0-9a-f-]{36}$/);
-    await fs.rm(root, { recursive: true, force: true });
+    // Windows can briefly keep just-closed JSONL/JSON handles (EBUSY/EPERM).
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 

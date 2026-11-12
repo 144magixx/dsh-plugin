@@ -114,11 +114,17 @@ export async function apply(ctx, rawConfig = {}) {
   const service = new NavigatorService(ctx, domain.table('summaries'), config);
   ctx.provide('sessionNavigator', service);
   ctx.effect(() => () => service.lifetime.abort());
-  ctx.sessionProjections.register(projectionDefinition);
+  const registration = ctx.sessionProjections.register(projectionDefinition);
   ctx.sessionProjections.onChanged((session, key) => service.onProjection(session, key));
   for (const action of ACTIONS) ctx.connection.fetch.register({ path: `/api/session-navigator/${action}`, methods: ['POST'], requestBody: 'streaming', fetch: routeHandler(service, action) });
   ctx.connection.fetch.register({ path: '/api/session-navigator/watch', methods: ['POST'], requestBody: 'streaming', fetch: watchHandler(service) });
   ctx.tools.register(createTool(service));
   ctx.effect(() => async () => { await service.dispose(); await domain.close(); });
+  // 0.2.2 resolves register() to a handle and deprecates registry stateOf(session, key);
+  // 0.2.1 returns only a disposer. Prefer the handle, else keep the registry read.
+  try {
+    const handle = await registration;
+    if (typeof handle?.stateOf === 'function') service.projection = handle;
+  } catch (error) { ctx.logger?.warn?.(`session-navigator: projection registration failed; using registry reads: ${error?.message ?? error}`); }
   void service.start();
 }

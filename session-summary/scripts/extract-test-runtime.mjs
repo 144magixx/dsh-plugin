@@ -45,7 +45,27 @@ export function openArchive(filename = archivePath) {
   return { fd, header, lookup, read, close: () => fs.closeSync(fd) };
 }
 
+/**
+ * Files extracted from a different app.asar (another DSH version via DSH_TEST_ASAR, or an app update) must not
+ * linger: stale hashed bundles such as dist/assets/index-<hash>.js would be picked up instead of the current ones.
+ * The extraction is tagged with the archive identity and the extracted tree is dropped only when that identity changes.
+ */
+function resetRuntimeForArchive(filename = archivePath) {
+  const stat = fs.statSync(filename);
+  const identity = `${path.resolve(filename)}\n${stat.size}\n${Math.trunc(stat.mtimeMs)}\n`;
+  const marker = path.join(runtimeDir, '.archive-identity');
+  let previous;
+  try { previous = fs.readFileSync(marker, 'utf8'); } catch { /* first extraction */ }
+  if (previous === identity) return;
+  const modules = path.join(runtimeDir, 'node_modules');
+  if (path.dirname(modules) !== runtimeDir || path.basename(runtimeDir) !== '.runtime') throw new Error(`Refusing to reset unexpected runtime path: ${modules}`);
+  fs.rmSync(modules, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(marker, identity);
+}
+
 export function extractPackages(packageNames) {
+  resetRuntimeForArchive();
   const archive = openArchive();
   const copied = new Set();
   const missing = new Set();

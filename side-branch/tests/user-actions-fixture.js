@@ -5,6 +5,8 @@
   const React = shared.react;
   const h = React.createElement;
   const require = id => { if (!(id in shared)) throw new Error('Missing shared module ' + id); return shared[id]; };
+  // DSH >= 0.2.2 client bundles resolve packaged assets through `require.asset`; the offline fixture keeps the path inert.
+  require.asset = assetPath => assetPath;
   const native = window.__registrations['@deepseek-ai/dsh-client-ui-chat'].factory(require);
   const renderer = window.__registrations['@deepseek-ai/dsh-client-ui-renderer'].factory(require);
   const plugin = window.__registrations['dsh-side-branch'].factory(require);
@@ -27,7 +29,7 @@
   ctx.slots.installScope('session', { current: stable({ key: undefined, hooks: {}, keyedHooks: {}, props: {} }) });
   ctx.provide('sidebarRight', { mounted: stable('main-session') });
   ctx.slots.provideRoot({ hooks: { chat: stable(snapshot) }, props: { sessionId: 'branch-session', useAccess: () => true } });
-  const rootRegistration = ctx.slots.register({ name: 'root', children: { 'conversation.chat.node': { kind: 'keyed', scope: 'root' } } }, ({ renderSlot }) => h('main', null, nodes.map(node => h('section', { key: node.id, 'data-fixture-node': node.id }, renderSlot('conversation.chat.node', { node, loadImage: () => '' }, { key: node.kind, entryKey: node.kind })))));
+  const rootRegistration = ctx.slots.register({ name: 'root', children: { 'conversation.chat.node': { kind: 'keyed', scope: 'root' } } }, ({ renderSlot }) => h('main', null, nodes.map(node => h('section', { key: node.id, 'data-fixture-node': node.id }, renderSlot('conversation.chat.node', { node, loadImage: () => '', renderSlotChain: () => null }, { key: node.kind, entryKey: node.kind })))));
   ctx.slots.registerFactory({ name: 'conversation.chat.user.content', scope: 'root', locale: 'chat', children: { 'conversation.chat.user.images': { kind: 'single', scope: 'root' } } }, native.__UserContent);
   ctx.slots.registerFactory({ name: 'conversation.user.text', scope: 'root' }, ({ text }) => h('span', { 'data-fixture-text': true }, text));
   let removeNative = ctx.slots.register({ name: 'conversation.chat.node', key: 'user', locale: 'chat' }, native.__UserMessageNodeView);

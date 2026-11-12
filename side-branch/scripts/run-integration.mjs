@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { extractPackages, runtimeDir, workspace } from './extract-test-runtime.mjs';
 
-const packages = ['@deepseek-ai/cordis', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-persistence-jsonl', '@deepseek-ai/dsh-session-turn-outline', '@deepseek-ai/dsh-api-session-controller', '@deepseek-ai/dsh-agent-loop', '@deepseek-ai/dsh-storage-json', '@deepseek-ai/dsh-client-modules', '@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-web-frontend'];
-const extraction = extractPackages(packages);
+// dsh-client-ui-chat is also what `npm run test:browser` loads from scripts/.runtime.
+const packages = ['@deepseek-ai/cordis', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-persistence-jsonl', '@deepseek-ai/dsh-session-turn-outline', '@deepseek-ai/dsh-api-session-controller', '@deepseek-ai/dsh-agent-loop', '@deepseek-ai/dsh-storage-json', '@deepseek-ai/dsh-client-modules', '@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-client-ui-chat', '@deepseek-ai/dsh-web-frontend'];
+// DSH >= 0.2.2 needs an explicit tool executor in the composed host; older archives do not ship one.
+const extraction = extractPackages(packages, ['@deepseek-ai/dsh-tool-executor-native']);
 console.log(`Installed runtime: extracted ${extraction.packages.length} package dependencies (${(extraction.byteCount / 1024 / 1024).toFixed(1)} MiB) into scripts/.runtime.`);
 console.log('Tests use workspace persistence, an in-process fake LLM, and guards against sockets, networking, and subprocess execution.');
 const testHome = path.join(workspace, 'tests', '.integration-data', 'test-home');

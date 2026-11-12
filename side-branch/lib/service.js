@@ -31,9 +31,18 @@ export class SideBranchService {
   }
   checkCapabilities() {
     const c = this.ctx;
-    if (typeof c.sessionController?.fork !== 'function' || typeof c.sessionController?.agents?.selectForNextRequest !== 'function' || typeof c.sessionQuery?.observeSession !== 'function' || typeof c.sessions?.flush !== 'function') {
-      fail('unsupported-runtime', 'Native fork/model/persistence interfaces required by DSH 0.2.1-rc.2 are unavailable.');
+    // Model selection is `sessionController.agents.selectForNextRequest` through DSH 0.2.1
+    // and `agent.model.select` from 0.2.2; the latter is per Agent, so it is verified in initialize().
+    if (typeof c.sessionController?.fork !== 'function' || typeof c.sessionController?.resolveAgent !== 'function' || typeof c.sessionQuery?.observeSession !== 'function' || typeof c.sessions?.flush !== 'function') {
+      fail('unsupported-runtime', 'Native fork/model/persistence interfaces required by DSH 0.2.1 or newer are unavailable.');
     }
+  }
+  /** Record a session-local model choice with whichever native interface this DSH provides. */
+  selectModel(agent, model) {
+    if (typeof agent.model?.select === 'function') return agent.model.select(model);
+    const legacy = this.ctx.sessionController?.agents?.selectForNextRequest;
+    if (typeof legacy !== 'function') fail('unsupported-runtime', 'Native model selection is unavailable in this DSH version.');
+    return legacy.call(this.ctx.sessionController.agents, agent, model);
   }
   onCreated({ agent }) {
     // Native fork publishes its Agent before its async command resolves. Fence
@@ -169,7 +178,7 @@ export class SideBranchService {
       child.inbox.clear();
       const resolved = await this.ctx.llm.resolveCallConfig(config.model);
       if (resolved.provider !== config.model.provider || resolved.model !== config.model.model) fail('model-unavailable', 'The captured source model is no longer available.');
-      this.ctx.sessionController.agents.selectForNextRequest(child, config.model);
+      this.selectModel(child, config.model);
       const presetIdentity = config.permissionPreset === 'custom' ? config.recordedPermissionPreset : config.permissionPreset;
       if (!presetIdentity || presetIdentity === 'custom') fail('permission-unavailable', 'Cannot reconstruct the source permission preset identity.');
       this.ctx.permissionPresets.set(child.session, presetIdentity);

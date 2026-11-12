@@ -4,6 +4,8 @@
 
 插件是纯 JavaScript，零运行时依赖、无需构建，面向 **Windows 和 macOS** 的 DSH Desktop / Web GUI；各插件实际能力与平台验证范围以其 README 和验收记录为准。
 
+版本兼容：各插件按 DSH 0.2.1-rc.2 与 0.2.2-rc.1 两版宿主源码核对，单元测试与集成测试在两版上均通过（macOS）。宿主接口有差异的地方都做了特性检测，例如 0.2.2 的 `agent.model.select` 和 0.2.1 的 `selectForNextRequest`、0.2.2 才有的会话交互注册表。新增宿主依赖时须同样兼容旧版，可用 `DSH_TEST_ASAR` 指向旧版 `app.asar` 运行集成测试。
+
 ## 插件列表
 
 | 插件 | 目录 | 用途 | npm 包名 |

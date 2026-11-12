@@ -25,15 +25,27 @@ function alertRecord(value) {
 }
 
 /** A process lease prevents two Hosts from overwriting acknowledgements in the shared store. */
-export async function acquireLease({ identity = process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), onLost = () => {} } = {}) {
-  const hash = createHash('sha256').update(path.resolve(identity)).digest().readUInt32BE(0);
-  const port = 42000 + hash % 20000;
-  const server = net.createServer(socket => socket.destroy());
-  await new Promise((resolve, reject) => {
-    const fail = error => { server.close(); reject(new Error(`Task alerts lease unavailable (${error.code || 'bind_failed'}).`)); };
-    server.once('error', fail);
-    server.listen({ port, host: '127.0.0.1', exclusive: true }, () => { server.removeListener('error', fail); resolve(); });
-  });
+const LEASE_BASE_PORT = 42000, LEASE_PORT_SPAN = 20000, LEASE_BIND_ATTEMPTS = 16;
+export async function acquireLease({ identity = process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), onLost = () => {}, createServer = net.createServer } = {}) {
+  const start = createHash('sha256').update(path.resolve(identity)).digest().readUInt32BE(0) % LEASE_PORT_SPAN;
+  let server, port, failure;
+  // Windows reserves port ranges (Hyper-V/WSL/Docker) that refuse binds with EACCES on every Host of the machine, so all
+  // Hosts skip the same ports in the same order. EADDRINUSE means another Host holds the lease and is never skipped.
+  for (let attempt = 0; attempt < LEASE_BIND_ATTEMPTS && !server; attempt++) {
+    const candidate = LEASE_BASE_PORT + (start + attempt) % LEASE_PORT_SPAN, listener = createServer(socket => socket.destroy());
+    try {
+      await new Promise((resolve, reject) => {
+        listener.once('error', reject);
+        listener.listen({ port: candidate, host: '127.0.0.1', exclusive: true }, () => { listener.removeListener('error', reject); resolve(); });
+      });
+      server = listener; port = candidate;
+    } catch (error) {
+      failure = error;
+      try { listener.close(); } catch { /* never listened */ }
+      if (error?.code !== 'EACCES') break;
+    }
+  }
+  if (!server) throw new Error(`Task alerts lease unavailable (${failure?.code || 'bind_failed'}).`);
   let closed = false;
   server.on('error', error => { if (!closed) onLost(error); });
   server.unref();

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadOfflineClient } from './integration-client-runtime.mjs';
-import { extractHostIcons } from '../scripts/extract-host-icons.mjs';
+import { extractHostIcons, extractHostIconGeometry } from '../scripts/extract-host-icons.mjs';
 
 const stable = value => ({ getSnapshot: () => value, subscribe: () => () => {} });
 
@@ -87,5 +87,19 @@ test('copied host icon markup still matches the installed ui-primitives', async 
   const { runInNewContext } = await import('node:vm');
   runInNewContext(readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8'), { window: { __ModuleLoader__: { load: value => { registration = value; } } }, URL, URLSearchParams, AbortController, console });
   const client = registration.factory(() => ({ createElement: () => null, createContext: () => ({}), Fragment: 'F' }));
-  assert.deepEqual(JSON.parse(JSON.stringify(client.HOST_ICONS)), JSON.parse(JSON.stringify(host)));
+  const copied = JSON.parse(JSON.stringify(client.HOST_ICONS));
+  // 0.2.1 hosts render inline markup, which must match byte for byte. 0.2.2+ renders sprite references, so the
+  // plugin's self-contained copy is compared by path geometry against the referenced symbol instead.
+  const isSprite = entry => entry[2]?.length === 1 && entry[2][0][0] === 'use';
+  const inline = Object.fromEntries(Object.entries(host).filter(([, entry]) => !isSprite(entry)));
+  const sprites = Object.fromEntries(Object.entries(host).filter(([, entry]) => isSprite(entry)));
+  assert.deepEqual(Object.keys(copied).sort(), Object.keys(host).sort());
+  assert.deepEqual(Object.fromEntries(Object.keys(inline).map(key => [key, copied[key]])), JSON.parse(JSON.stringify(inline)));
+  if (Object.keys(sprites).length) {
+    const geometry = await extractHostIconGeometry(sprites);
+    for (const key of Object.keys(sprites)) {
+      assert.ok(Array.isArray(geometry[key]) && geometry[key].length > 0, `host sprite symbol for ${key}`);
+      assert.deepEqual([...JSON.stringify(copied[key]).matchAll(/"d":"([^"]+)"/g)].map(match => match[1]).sort(), geometry[key], `icon geometry of ${key}`);
+    }
+  }
 });

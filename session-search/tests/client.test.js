@@ -220,6 +220,42 @@ test('shortcut gesture ignores IME, repeats, wrong modifiers and unrelated keys'
     assert.equal(core.shortcutGesture({ ...base, ...patch }), false)
 })
 
+test('web shortcut uses Cmd on macOS and Ctrl elsewhere, and falls back to either when the platform is unknown', () => {
+  const key = patch => ({ code: 'KeyF', ...patch })
+  assert.equal(core.shortcutGesture(key({ metaKey: true }), 'macos'), true)
+  assert.equal(core.shortcutGesture(key({ ctrlKey: true }), 'macos'), false, 'Ctrl+F keeps native text-editing meaning on macOS')
+  for (const platform of ['windows', 'linux', 'other']) {
+    assert.equal(core.shortcutGesture(key({ ctrlKey: true }), platform), true)
+    assert.equal(core.shortcutGesture(key({ metaKey: true }), platform), false, 'Windows/Super key is not the search modifier')
+    assert.equal(core.shortcutGesture(key({ ctrlKey: true, metaKey: true }), platform), false)
+  }
+  assert.equal(core.shortcutGesture(key({ metaKey: true })), true)
+  assert.equal(core.shortcutGesture(key({ ctrlKey: true })), true)
+  assert.equal(core.webPlatform({ platform: 'windows' }), 'windows')
+  assert.equal(core.webPlatform(undefined), undefined, 'no service and no navigator')
+})
+
+test('web fallback listener follows the host platform and is released on dispose', () => {
+  for (const [platform, accepted, rejected] of [['macos', { metaKey: true }, { ctrlKey: true }], ['windows', { ctrlKey: true }, { metaKey: true }]]) {
+    const listeners = new Map()
+    let registered
+    vm.runInNewContext(source, {
+      window: { __ModuleLoader__: { load(value) { registered = value } }, addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: type => listeners.delete(type) },
+      document: { querySelector: () => null }, AbortController, setTimeout, clearTimeout, console,
+    })
+    const client = registered.factory(() => ({}))
+    const opened = []
+    const dispose = client.installShortcuts({ get: () => ({ runtime: 'web', platform }), sessions: { list: { getSnapshot: () => ({ byId: { s1: { id: 's1', retainedBy: { mainView: 1 } } } }) } } }, { open: (...args) => opened.push(args), getSnapshot: () => ({ shortcutErrors: [] }), set() {} }, key => key)
+    const press = patch => listeners.get('keydown')({ code: 'KeyF', preventDefault() {}, stopPropagation() {}, ...patch })
+    press(rejected)
+    assert.equal(opened.length, 0)
+    press({ ...accepted, shiftKey: true })
+    assert.deepEqual(plain(opened), [['all', 's1']])
+    dispose()
+    assert.equal(listeners.size, 0)
+  }
+})
+
 test('unknown subagents open their parent without misrouting ordinary forks', () => {
   assert.deepEqual(plain(core.navigationTarget({ sessionId: 'child', origin: 'subagent', parentSession: 'parent' }, { byId: {} })), { target: 'parent', kind: 'parent' })
   assert.deepEqual(plain(core.navigationTarget({ sessionId: 'child', origin: 'subagent', parentSession: 'parent' }, { byId: { child: {} } })), { target: 'child', kind: 'session' })

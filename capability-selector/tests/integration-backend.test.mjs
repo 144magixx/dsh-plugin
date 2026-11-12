@@ -49,7 +49,7 @@ test('native Cordis: backend mount, current-session route, runtime providers, re
   assert.ok(scan.body.items.some(item => item.name === 'native-test' && item.runtimeProvider === 'runtime'));
   const office = scan.body.items.filter(item => item.runtimeProvider === 'dsh-office');
   assert.equal(office.length, 7, 'all bundled Office skills are discovered through the real provider');
-  assert.ok(office.every(item => item.sources.some(row => row.path.endsWith('/SKILL.md') || row.path.startsWith('provider:'))));
+  assert.ok(office.every(item => item.sources.some(row => /[\\/]SKILL\.md$/.test(row.path) || row.path.startsWith('provider:'))));
   assert.ok(scan.body.items.some(item => item.name === 'native-mcp' && item.status === 'configured'));
   assert.ok(!JSON.stringify(scan.body).includes('native-secret-must-not-return'));
   assert.ok(!JSON.stringify(scan.body).includes('TOKEN'));

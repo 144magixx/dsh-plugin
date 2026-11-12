@@ -1,13 +1,20 @@
 import '../scripts/offline-test-guard.mjs';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runtimeImport, installRuntimeResolution } from '../scripts/test-runtime.mjs';
-import { workspace } from '../scripts/extract-test-runtime.mjs';
+import { runtimeDir, workspace } from '../scripts/extract-test-runtime.mjs';
 
 installRuntimeResolution();
 const { Context } = await runtimeImport('@deepseek-ai/cordis');
 const llmModule = await runtimeImport('@deepseek-ai/dsh-llm');
+
+/** Session-local model choice: `agent.model.select` (DSH >= 0.2.2) or the 0.2.1 session-controller entry point. */
+export function selectModel(ctx, agent, selection) {
+  if (typeof agent.model?.select === 'function') return agent.model.select(selection);
+  return ctx.sessionController.agents.selectForNextRequest(agent, selection);
+}
 
 export class OfflineAdapter extends llmModule.LlmAdapter {
   requests = [];
@@ -56,6 +63,8 @@ export async function createIsolatedHost({ root, reopen = false } = {}) {
     await mount('dsh-workspace');
     await mount('dsh-system-prompt', {});
     await mount('dsh-tools');
+    // DSH >= 0.2.2 refuses to run an agent without a tool executor; 0.2.1 has no such package.
+    if (fsSync.existsSync(path.join(runtimeDir, 'node_modules', '@deepseek-ai', 'dsh-tool-executor-native'))) await mount('dsh-tool-executor-native');
     await mount('dsh-llm');
     ctx.llm.registerAdapter(['offline-test'], adapter);
     await mount('dsh-agent');
@@ -69,6 +78,8 @@ export async function createIsolatedHost({ root, reopen = false } = {}) {
     ctx.provide('shell', { sandboxMode: 'workspace-write' });
     ctx.provide('fs', {});
     ctx.provide('remoteAccess', { allows: () => true });
+    // DSH >= 0.2.2 SessionController injects `typertGateway` (pending remote event replay); no remote exists here.
+    ctx.provide('typertGateway', { getPendingRemoteEvents: () => [] });
     ctx.provide('fileUploads', { registerAgentResolver: () => () => {}, bindPrompt: () => ({ commit() {}, [Symbol.dispose]() {} }) });
     ctx.provide('attachments', { imageLimits: { maxImageBytes: 10000000, maxImagesPerMessage: 8, maxMessageImageBytes: 20000000, maxImagePixels: 20000000, maxImageDimension: 10000, mediaTypes: ['image/png', 'image/jpeg'] }, admitPromptContent: async content => content });
     await mount('dsh-permission-presets', { defaultPreset: 'workspace-write' });

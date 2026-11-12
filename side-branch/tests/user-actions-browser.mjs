@@ -14,8 +14,15 @@ import { runtimeDir, workspace, openArchive } from '../scripts/extract-test-runt
 const screenshotFlag = process.argv.indexOf('--screenshot');
 const screenshotPath = screenshotFlag >= 0 ? path.resolve(process.argv[screenshotFlag + 1] ?? path.join(workspace, 'artifacts/user-actions-preview.png')) : undefined;
 
+// Usual Chrome/Edge locations per platform; CHROME_PATH or --browser always wins.
+function browserCandidates(platform = process.platform, env = process.env) {
+  if (platform === 'win32') return [env.LOCALAPPDATA, env.ProgramFiles, env['ProgramFiles(x86)']].filter(Boolean)
+    .flatMap(base => [path.win32.join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'), path.win32.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe')]);
+  if (platform === 'darwin') return ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge', '/Applications/Chromium.app/Contents/MacOS/Chromium'];
+  return ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
+}
 const flag = process.argv.indexOf('--browser');
-const browser = (flag >= 0 ? process.argv[flag + 1] : undefined) ?? process.env.CHROME_PATH ?? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', '/usr/bin/chromium'].find(file => fs.existsSync(file));
+const browser = (flag >= 0 ? process.argv[flag + 1] : undefined) ?? process.env.CHROME_PATH ?? browserCandidates().find(file => fs.existsSync(file));
 if (!browser) throw new Error('Set CHROME_PATH or pass --browser.');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-user-actions-browser-'));
 const assets = path.join(runtimeDir, 'node_modules/@deepseek-ai/dsh-web-frontend/dist/assets');

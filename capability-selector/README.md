@@ -115,3 +115,7 @@ npm pack --pack-destination artifacts
 浏览器检查使用隔离 Chrome 和本机 DSH 安装包中的真实 React / 主题，加载实际选择器和摘要源码，不访问用户会话或认证信息。截图和测试数据位于 `tests/.integration-data`，不提交仓库。
 
 插件依赖 DSH `0.2.1-rc.3` 的公开插槽、`uiSession.current` 和原生 `requestDraftInitialization(..., { whenDraftExists: 'append' })` 接口；升级宿主后需要重新验证。
+
+旧版宿主（已核对 `0.2.1-rc.2`）的插槽、`uiSession`、HTTP 路由和工具接口与 `0.2.2-rc.1` 一致，插件可以加载；唯一差异是旧版忽略 `whenDraftExists`：输入框为空时仍可直接添加，已有草稿或附件时返回 `preserved`，插件不会改写草稿，而是提示改用“复制使用说明”。
+
+Windows：CLI 仅按 `PATHEXT` 的扩展名查找（忽略 npm 生成的无扩展名 POSIX 脚本），`PATH` 项支持引号和 `Path` 大小写；`.cmd` / `.bat` 入口不经 shell 启动，因此不会发现 `o2` 子能力，只显示安装状态并给出扫描提示。Claude 的 `.claude.json` 工程键同时匹配 `C:\a\b` 与 `C:/a/b` 写法。测试中的目录符号链接使用 junction，无需管理员权限。

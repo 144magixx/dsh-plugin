@@ -56,12 +56,30 @@ test('offline and old Host failures retain prior alerts and recover on the next 
     assert.equal(f.store.getSnapshot().status, 'offline'); assert.equal(f.store.getSnapshot().alerts.length, 1);
     f.fire(3000); f.calls[2].reject(Object.assign(new Error('not found'), { status: 404 })); await settle();
     assert.equal(f.store.getSnapshot().status, 'unavailable'); assert.equal(f.store.getSnapshot().alerts.length, 1);
-    f.fire(3000); f.calls[3].resolve(response([alert('b')])); await settle();
+    f.fire(6000); f.calls[3].resolve(response([alert('b')])); await settle();
     assert.equal(f.store.getSnapshot().status, 'online'); assert.equal(f.store.getSnapshot().alerts[0].id, 'b');
     f.fire(3000); f.calls[4].resolve({ ok: true, alerts: [] }); await settle();
     assert.equal(f.store.getSnapshot().status, 'unavailable', 'missing new contract fields cannot claim healthy');
     assert.equal(f.store.getSnapshot().alerts[0].id, 'b');
   } finally { f.store.dispose(); }
+});
+
+test('repeated failures (503 while the Host drains, 404 on an old Host) back off to a ceiling and a success resets the cadence', async () => {
+  const f = fixture();
+  try {
+    f.store.start();
+    const delays = [];
+    for (let index = 0; index < 7; index++) {
+      f.calls[index].reject(Object.assign(new Error('draining'), { status: 503 })); await settle();
+      const [, pending] = [...f.timers].at(-1); delays.push(pending.delay);
+      f.fire(pending.delay);
+    }
+    assert.deepEqual(delays, [3000, 6000, 12000, 24000, 30000, 30000, 30000], 'bounded exponential backoff, never a busy loop');
+    f.calls[7].resolve(response([alert()])); await settle();
+    assert.equal(f.store.getSnapshot().status, 'online');
+    assert.equal([...f.timers].at(-1)[1].delay, 3000, 'recovery restores the normal poll interval');
+  } finally { f.store.dispose(); }
+  assert.equal(f.timers.size, 0, 'disposal leaves no reconnect timer behind');
 });
 
 test('an unresponsive request times out and disposal fences late publication', async () => {

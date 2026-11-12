@@ -193,3 +193,17 @@ test('findThumbnail resolves only normal draft image thumbnails', () => {
   assert.equal(client.findThumbnail(img, { contains: () => false }, attachments, {}), null, 'outside the rail (e.g. editor portal)');
   assert.equal(client.findThumbnail(img, host, [{ id: 'one', kind: 'file', previewUrl: 'blob:one' }], {}), null);
 });
+
+test('shortcut hints name Cmd on macOS and Ctrl on Windows/Linux', () => {
+  assert.equal(client.isMacPlatform({ platform: 'MacIntel' }), true);
+  assert.equal(client.isMacPlatform({ userAgentData: { platform: 'macOS' }, platform: '' }), true);
+  assert.equal(client.isMacPlatform({ platform: 'Win32', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }), false);
+  assert.equal(client.isMacPlatform({ userAgentData: { platform: 'Windows' } }), false);
+  assert.equal(client.isMacPlatform(undefined), false);
+  assert.equal(client.shortcutLabel('undo', true), '⌘Z');
+  assert.equal(client.shortcutLabel('undo', false), 'Ctrl+Z');
+  assert.equal(client.shortcutLabel('redo', true), '⇧⌘Z');
+  assert.equal(client.shortcutLabel('redo', false), 'Ctrl+Y');
+  assert.equal(client.shortcutLabel('save', true), '⌘S');
+  assert.equal(client.shortcutLabel('save', false), 'Ctrl+S');
+});

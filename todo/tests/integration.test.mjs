@@ -116,6 +116,7 @@ test('native Cordis + storage domain: durable reminders, finite HTTP bodies, dra
     assert.equal(errors.length, 0, JSON.stringify(errors));
   } finally {
     for (const fiber of fibers.reverse()) { try { await fiber.dispose(); } catch {} }
-    await fs.rm(root, { recursive: true, force: true });
+    // Windows may still hold the JSON storage files for a moment after dispose (EBUSY/EPERM).
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });

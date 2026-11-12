@@ -51,10 +51,12 @@ window.__ModuleLoader__.load({
       return t({ failed: 'alertFailed', retrying: 'alertRetrying', resumed: 'alertResumed', resolved: 'alertResolved' }[alert.state] || 'alertUnknown');
     }
     /** One passive catalog poll for the plugin lifetime, independent of the selected session. */
-    function createAlertStore(api, { pollMs = 3000, timeoutMs = 10000, schedule = setTimeout, unschedule = clearTimeout } = {}) {
+    function createAlertStore(api, { pollMs = 3000, maxBackoffMs = 30000, timeoutMs = 10000, schedule = setTimeout, unschedule = clearTimeout } = {}) {
       let state = { alerts: [], total: 0, hasMore: false, readToken: null, bulkBusy: false, fault: null, status: 'loading', collapsed: false, busy: [], actionError: null, serverNow: null };
       const listeners = new Set(), controllers = new Set();
-      let started = false, disposed = false, timer, pending, generation = 0;
+      let started = false, disposed = false, timer, pending, generation = 0, failures = 0;
+      // Consecutive failures (a draining Host answers 503, an old Host 404) back off to a bounded ceiling; any success resets.
+      const nextDelay = () => failures > 1 ? Math.min(pollMs * 2 ** (failures - 1), Math.max(pollMs, maxBackoffMs)) : pollMs;
       const publish = patch => { if (!disposed) { state = { ...state, ...patch }; for (const listener of listeners) listener(); } };
       const keyOf = alert => JSON.stringify([alert.sessionId, alert.id]);
       async function request(action, payload) {
@@ -82,12 +84,14 @@ window.__ModuleLoader__.load({
             });
             const hasMore = value.hasMore === true;
             const total = hasMore && Number.isSafeInteger(value.total) ? Math.max(alerts.length, value.total) : alerts.length;
+            failures = 0;
             publish({ alerts, total, hasMore, readToken: typeof value.readToken === 'string' && value.readToken ? value.readToken : null, fault: value.fault || null, status: 'online', serverNow: Number.isFinite(value.serverNow) ? value.serverNow : null });
           } catch (error) {
+            if (!disposed && requestGeneration === generation) failures++;
             if (!disposed && requestGeneration === generation) publish({ status: [404, 405, 501].includes(error.status) || error.code === 'invalid_response' ? 'unavailable' : 'offline' });
           } finally {
             pending = null;
-            if (started && !disposed) timer = schedule(() => { void refresh(); }, pollMs);
+            if (started && !disposed) timer = schedule(() => { void refresh(); }, nextDelay());
           }
         })();
         return pending;

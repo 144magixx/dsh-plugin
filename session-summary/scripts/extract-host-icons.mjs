@@ -61,6 +61,23 @@ export async function extractHostIcons() {
   return table;
 }
 
+/**
+ * DSH 0.2.2+ renders icons as `<use href="#dsw-icon-…">` references into the primitives' ICON_SYMBOLS sprite, so the
+ * inline markup of 0.2.1 no longer exists to compare. Return the path geometry (`d` values) of every referenced symbol,
+ * keyed like ICON_NAMES; an icon that is not a sprite reference, or whose symbol is missing, is `undefined`.
+ */
+export async function extractHostIconGeometry(hostIcons) {
+  const runtime = await loadOfflineClient();
+  const symbols = runtime.staticModules['@deepseek-ai/dsh-client-ui-primitives'].ICON_SYMBOLS ?? {};
+  const table = {};
+  for (const [key, [, , children = []]] of Object.entries(hostIcons)) {
+    const use = children.length === 1 && children[0][0] === 'use' ? children[0][1].href : undefined;
+    const markup = typeof use === 'string' ? symbols[use.replace(/^#/, '')] : undefined;
+    table[key] = typeof markup === 'string' ? [...markup.matchAll(/ d="([^"]+)"/g)].map(match => match[1]).sort() : undefined;
+  }
+  return table;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   console.log(JSON.stringify(await extractHostIcons()));
 }

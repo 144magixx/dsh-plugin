@@ -136,3 +136,51 @@ test('OS lease still excludes concurrent acknowledgement writers and releases cl
   const next = await acquireLease({ identity });
   await next.close();
 });
+
+/** Fake net.Server whose bind outcome per port is scripted: a code string fails with it, anything else binds. */
+function scriptedServers(outcomes) {
+  const bound = [], closed = [];
+  const createServer = () => {
+    const handlers = new Map();
+    const server = {
+      once: (event, handler) => { handlers.set(event, handler); return server; },
+      on: () => server, removeListener: () => server, unref: () => server,
+      listen({ port }, ready) {
+        const outcome = outcomes(port, bound.length);
+        queueMicrotask(() => {
+          if (typeof outcome === 'string') handlers.get('error')?.(Object.assign(new Error(outcome), { code: outcome }));
+          else { bound.push(port); ready(); }
+        });
+      },
+      close: callback => { closed.push(true); callback?.(); },
+    };
+    return server;
+  };
+  return { createServer, bound, closed };
+}
+
+test('lease skips ports the OS refuses with EACCES (Windows excluded ranges) in a deterministic order', async () => {
+  const identity = path.join(os.tmpdir(), 'task-alerts-' + randomUUID());
+  const seen = [];
+  const refuse = scriptedServers((port, bound) => { seen.push(port); return seen.length <= 2 ? 'EACCES' : undefined; });
+  const lease = await acquireLease({ identity, createServer: refuse.createServer });
+  assert.equal(seen.length, 3);
+  assert.deepEqual(seen.map(port => port - seen[0]).map(offset => (offset + 20000) % 20000), [0, 1, 2], 'consecutive ports wrapped inside the lease range');
+  assert.ok(seen.every(port => port >= 42000 && port < 62000));
+  assert.equal(lease.port, seen[2]);
+  assert.equal(refuse.closed.length, 2, 'refused listeners are closed');
+  // A second Host on the same machine walks the same sequence and finds the first Host's lease held.
+  const second = scriptedServers(port => port === lease.port ? 'EADDRINUSE' : 'EACCES');
+  await assert.rejects(acquireLease({ identity, createServer: second.createServer }), /lease unavailable \(EADDRINUSE\)/);
+  await lease.close();
+});
+
+test('lease never skips a held port and gives up after bounded EACCES attempts', async () => {
+  const held = scriptedServers(() => 'EADDRINUSE'), attempts = [];
+  await assert.rejects(acquireLease({ identity: 'held', createServer: () => { attempts.push(1); return held.createServer(); } }), /lease unavailable \(EADDRINUSE\)/);
+  assert.equal(attempts.length, 1);
+  const blocked = [];
+  const refusal = scriptedServers(port => { blocked.push(port); return 'EACCES'; });
+  await assert.rejects(acquireLease({ identity: 'blocked', createServer: refusal.createServer }), /lease unavailable \(EACCES\)/);
+  assert.equal(blocked.length, 16);
+});

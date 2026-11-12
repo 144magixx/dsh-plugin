@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { hash, safeText, skillMetadata, parseCodexMcp, jsonMcpEntries, mcpSummary } from './parsing.js';
+import { hash, safeText, skillMetadata, parseCodexMcp, jsonMcpEntries, projectEntry, mcpSummary } from './parsing.js';
 
 export { safeText, parseCodexMcp, jsonMcpEntries } from './parsing.js';
 export const LIMITS = Object.freeze({ roots: 80, ancestors: 12, depth: 5, directories: 2000, skills: 400, bundleFiles: 256, fileBytes: 1024 * 1024, bundleBytes: 8 * 1024 * 1024, totalBytes: 32 * 1024 * 1024, configBytes: 1024 * 1024, detailChars: 12000, commandMs: 3000, commandBytes: 512 * 1024, warnings: 100, cacheSessions: 32, scanMs: 20000 });
@@ -149,12 +149,26 @@ export function runReadOnlyCommand(command, args, { signal, timeoutMs = LIMITS.c
   });
 }
 
+/** Windows environments are case-insensitive, but a plain object copy of process.env is not. */
+function envValue(env, key, platform) {
+  if (typeof env[key] === 'string') return env[key];
+  if (platform !== 'win32') return undefined;
+  const name = Object.keys(env).find(candidate => candidate.toLowerCase() === key.toLowerCase());
+  return name !== undefined && typeof env[name] === 'string' ? env[name] : undefined;
+}
 async function executable(command, home, env, platform, signal) {
-  const directories = [...new Set([...(env.PATH ?? '').split(path.delimiter).filter(directory => directory && path.isAbsolute(directory)), path.join(home, '.local', 'bin')])].slice(0, 128);
-  const extensions = platform === 'win32' ? ['', ...(env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';')] : [''];
+  const windows = platform === 'win32';
+  const unquote = directory => windows ? directory.trim().replace(/^"(.*)"$/, '$1') : directory;
+  const directories = [...new Set([...(envValue(env, 'PATH', platform) ?? '').split(path.delimiter).map(unquote).filter(directory => directory && path.isAbsolute(directory)), path.join(home, '.local', 'bin')])].slice(0, 128);
+  let extensions = [''];
+  if (windows) {
+    // Only PATHEXT entries can launch: an extensionless file next to `name.cmd` is npm's POSIX shim, which CreateProcess rejects.
+    const listed = (envValue(env, 'PATHEXT', platform) ?? '.EXE;.CMD;.BAT;.COM').split(';').map(extension => extension.trim()).filter(extension => extension.startsWith('.'));
+    extensions = listed.some(extension => command.toLowerCase().endsWith(extension.toLowerCase())) ? [''] : listed;
+  }
   for (const directory of directories) for (const extension of extensions) {
     check(signal); const candidate = path.join(directory, command + extension);
-    try { const stat = await fs.stat(candidate); if (!stat.isFile()) continue; await fs.access(candidate, platform === 'win32' ? constants.F_OK : constants.X_OK); return { path: candidate, realPath: await fs.realpath(candidate) }; } catch {}
+    try { const stat = await fs.stat(candidate); if (!stat.isFile()) continue; await fs.access(candidate, windows ? constants.F_OK : constants.X_OK); return { path: candidate, realPath: await fs.realpath(candidate) }; } catch {}
   }
 }
 function catalogRows(value) {
@@ -268,7 +282,8 @@ export async function discoverCapabilities({ cwd, home = homedir(), env = proces
       if (candidate.toml) { const parsed = parseCodexMcp(raw); entries = parsed.servers; if (parsed.unsupported) warning('MCP_TOML_PARTIAL', candidate.agent, real); }
       else {
         const parsed = JSON.parse(raw); entries = jsonMcpEntries(parsed, cwd);
-        const disabled = [...(Array.isArray(parsed.disabledMcpServers) ? parsed.disabledMcpServers : []), ...(Array.isArray(parsed.projects?.[cwd]?.disabledMcpServers) ? parsed.projects[cwd].disabledMcpServers : [])];
+        const projectDisabled = projectEntry(parsed.projects, cwd)?.disabledMcpServers;
+        const disabled = [...(Array.isArray(parsed.disabledMcpServers) ? parsed.disabledMcpServers : []), ...(Array.isArray(projectDisabled) ? projectDisabled : [])];
         for (const name of disabled) if (typeof name === 'string') claudeDisabled.add(name);
       }
       for (const row of entries.slice(0, 200)) pendingMcp.push({ ...row, agent: candidate.agent, path: real });
