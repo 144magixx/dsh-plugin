@@ -1,0 +1,14 @@
+A clean, high-fidelity UI design mockup (flat product screenshot style, light theme, crisp Simplified Chinese text, no device frame) of a desktop AI coding assistant app called "DeepSeek Harness". 16:10 landscape layout.
+
+LEFT HALF: a chat conversation column. Top: conversation title "JoyRisk 调研报告修改". A few chat bubbles in gray. At the bottom, the message input box. Inside the input box above the text area, three attachment chips in a row: chip 1 with a small screenshot thumbnail and label "批注 1 · h2 标题", chip 2 with thumbnail and label "批注 2 · 区域 320×140", chip 3 label "批注 3 · 字号 32→28px". Input placeholder text: "补充说明（可选）…". A round blue send button at right.
+
+RIGHT HALF: a right sidebar panel showing a rendered HTML report preview. Sidebar header row: a file path field "report/joyrisk.html", then on the right a pill-shaped toggle button "批注" with a pen-and-cursor icon, highlighted with a thick blue outline (active state), next to small icon buttons for refresh and open-external.
+The previewed page content: big bold title "JoyRisk 能力调研报告", gray subtitle "从一名希望理解风控业务、学习智能体的实习生出发", a section heading "1. 我对 JoyRisk 的整体理解", and paragraph text lines.
+Annotation overlays on the page:
+- The section heading "1. 我对 JoyRisk 的整体理解" is outlined with a solid blue 2px box and a small blue tag above it reading "h2.section-title".
+- A numbered blue circle pin "1" at the heading's left corner, a pin "2" on a paragraph area that is enclosed by a dashed blue rectangle (area selection), and a pin "3" near the subtitle.
+- A white floating comment popover with soft shadow anchored to the heading: textarea containing "这个标题字号改小一点，颜色换成品牌蓝"; bottom row with a sliders icon button labelled "样式", a gray text hint "⌘↩ 加入队列", and a round blue arrow send button.
+- Beside the popover, a compact style panel titled "样式微调" with rows: "字号  32px → 28px" with a slider, "颜色" with a blue color swatch, "间距  24px" with a slider, "字重 600". A small "重置" link.
+At the bottom of the sidebar, a sticky bar: "3 条批注待发送", buttons "清空" (secondary) and "发送到对话" (primary blue).
+
+Style: modern, minimal, generous whitespace, 8px rounded corners, brand blue #2563EB accents, neutral grays, subtle borders, legible UI typography. All text must be accurate Simplified Chinese as specified. No watermark.

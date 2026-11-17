@@ -362,3 +362,18 @@ test('a closed summary comes back pinned from its stack seat; a reveal is set on
   api.show('b');
   assert.deepEqual([api.prefs.getSnapshot().pinned, api.ui.getSnapshot().openSession, api.ui.getSnapshot().sidebarReveal], [true, 'b', true]);
 });
+
+test('a collapsed card stack frees the column only for the summary seated in it', () => {
+  const { stackCollapsedWith, STACK_COLLAPSED_ATTR } = client;
+  assert.equal(STACK_COLLAPSED_ATTR, 'data-dsh-card-stack-collapsed');
+  let docked = 's', marked = true;
+  const api = { ui: { getSnapshot: () => ({ docked }) } };
+  const doc = { documentElement: { hasAttribute: name => marked && name === STACK_COLLAPSED_ATTR } };
+  assert.equal(stackCollapsedWith(api, 's', doc), true);
+  assert.equal(stackCollapsedWith(api, 'other', doc), false, 'another session keeps its space');
+  docked = null;
+  assert.equal(stackCollapsedWith(api, 's', doc), false, 'a floating summary (older selector or none) is unaffected');
+  docked = 's'; marked = false;
+  assert.equal(stackCollapsedWith(api, 's', doc), false, 'older selectors never set the marker');
+  assert.equal(stackCollapsedWith(api, 's', {}), false);
+});

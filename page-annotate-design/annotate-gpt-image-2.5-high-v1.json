@@ -1,0 +1,12 @@
+{
+  "model": "gpt-image-2.5-sunburst",
+  "quality": "high",
+  "size": "1536x1024",
+  "n": 1,
+  "output_format": "png",
+  "promptFile": "/Users/minyuwei.6666/dsh-plugin/page-annotate-design/annotate-gpt-image-2.5-prompt.txt",
+  "imagePath": "/Users/minyuwei.6666/dsh-plugin/page-annotate-design/annotate-gpt-image-2.5-high-v1.png",
+  "bytes": 1751263,
+  "requestId": "08445a65-6f91-4cda-bd0a-01b79f6de270",
+  "createdAt": "2026-11-14T02:31:50.223Z"
+}

@@ -190,6 +190,7 @@ test('native renderSlot receives the selected session below controls and fixture
     useRef: value => ({ current: value }),
     useState: value => [value === null ? geometry : value, () => {}],
     useLayoutEffect() {}, useEffect() {},
+    useCallback: fn => fn, useMemo: fn => fn(),
   };
   const c = loadClient(react), api = c.createController({ request() {}, append() {}, current: () => ({ id: 's' }) });
   api.setSession('s', {});

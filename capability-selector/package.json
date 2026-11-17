@@ -1,6 +1,6 @@
 {
   "name": "dsh-capability-selector",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Discover and deduplicate local Skills, enterprise CLIs and MCP configurations; choose capabilities for the current DSH task.",
   "type": "module",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "check": "node --check lib/index.js && node --check lib/discovery.js && node --check lib/client.js",
     "test:browser": "node scripts/test-browser.mjs",
     "test:cards": "node scripts/test-card-accessories.mjs",
+    "test:collapse": "node scripts/test-stack-collapse.mjs",
     "test:integration": "node --test tests/integration-backend.test.mjs"
   },
   "dsh": {

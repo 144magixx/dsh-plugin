@@ -1,0 +1,54 @@
+{
+  "name": "dsh-upload-slim",
+  "version": "0.1.0",
+  "description": "上行瘦身：一键调低 DSH 发给模型的图片尺寸与体积，带策略选择与真实压缩前后对比，关闭即恢复；开启时告诉 Agent 图片是压缩预览。",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/144magixx/dsh-plugin.git",
+    "directory": "upload-slim"
+  },
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/service.js && node --check lib/core.js && node --check lib/client.js",
+    "test": "node --test tests/*.test.js",
+    "test:integration": "node scripts/run-integration.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-session"
+      ]
+    }
+  }
+}

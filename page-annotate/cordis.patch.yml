@@ -1,0 +1,6 @@
+# Registers an HTML preview action and a bounded Host save route.
+# Generated context and screenshots stay in the workspace; no subscriptions.
+- insert:
+    - id: page-annotate
+      name: dsh-page-annotate
+      config: {}

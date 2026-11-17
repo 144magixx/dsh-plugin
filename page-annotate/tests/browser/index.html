@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>page-annotate browser fixture</title>
+<!--
+  Serve the dsh-plugin repository root (e.g. `python3 -m http.server 8765` in
+  /Users/…/dsh-plugin) and open /page-annotate/tests/browser/index.html.
+  The shipped lib/client.js runs against real React 18 UMD; the header button
+  attaches to a same-origin iframe exactly like the unsandboxed Better Sidebar
+  HTML preview. The fake composer mirrors DSH's document-level paste route:
+  a paste carrying files outside an editable control is consumed
+  (preventDefault) and listed as attachments.
+-->
+<style>
+  :root { --dsw-alias-bg-base: #fff; --dsw-alias-bg-layer-1: #f5f5f7; --dsw-alias-bg-overlay: #fff; --dsw-alias-border-l1: #e5e5ea; --dsw-alias-border-l2: #d1d1d6; --dsw-alias-brand-primary: #2563eb; --dsw-alias-label-primary: #1d1d1f; --dsw-alias-label-secondary: #6e6e73; --dsw-alias-state-error-primary: #ff3b30; --dsw-font-xxxs-11: 11px/1.4 -apple-system, sans-serif; }
+  body { margin: 0; display: grid; grid-template-columns: 380px 1fr; height: 100vh; font: 13px -apple-system, "PingFang SC", sans-serif; }
+  #chat { border-right: 1px solid #e5e5ea; display: flex; flex-direction: column; padding: 12px; gap: 8px; }
+  #draft { flex: 1; width: 100%; box-sizing: border-box; font: 12px/1.5 ui-monospace, Menlo, monospace; }
+  #attachments { display: flex; gap: 6px; flex-wrap: wrap; }
+  #attachments figure { margin: 0; width: 110px; font-size: 10px; }
+  #attachments img { width: 110px; height: 70px; object-fit: contain; border: 1px solid #ddd; background: #fafafa; }
+  #side { display: flex; flex-direction: column; min-width: 0; }
+  .editorHeader { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid #e5e5ea; }
+  .path { flex: 1; padding: 4px 8px; border: 1px solid #e5e5ea; border-radius: 6px; color: #555; }
+  #surface { flex: 1; position: relative; }
+  #surface iframe { width: 100%; height: 100%; border: 0; display: block; }
+</style>
+</head>
+<body>
+  <div id="chat">
+    <strong>会话输入框（模拟）</strong>
+    <textarea id="draft" placeholder="draft"></textarea>
+    <div id="attachments"></div>
+  </div>
+  <div id="side">
+    <div class="editorHeader"><span class="path">report.html</span><span id="action"></span></div>
+    <div id="surface"><iframe src="report.html?same-origin=1" title="report"></iframe></div>
+  </div>
+<script src="../../../better-sidebar/node_modules/react/umd/react.development.js"></script>
+<script src="../../../better-sidebar/node_modules/react-dom/umd/react-dom.development.js"></script>
+<script>
+  window.__pa = null
+  window.__ModuleLoader__ = { load({ id, factory }) { window.__paId = id; window.__pa = factory((name) => ({ react: React, 'react-dom/client': ReactDOM, 'react-dom': ReactDOM })[name]) } }
+</script>
+<script src="../../lib/client.js"></script>
+<script>
+  const draft = document.getElementById('draft')
+  window.__attachments = []
+  document.addEventListener('paste', (event) => {
+    if (event.defaultPrevented || !event.clipboardData) return
+    const files = [...event.clipboardData.files]
+    if (files.length === 0) return
+    event.preventDefault()
+    for (const file of files) {
+      window.__attachments.push({ name: file.name, size: file.size, type: file.type })
+      const figure = document.createElement('figure')
+      const img = document.createElement('img')
+      img.src = URL.createObjectURL(file)
+      figure.append(img, file.name)
+      document.getElementById('attachments').append(figure)
+    }
+  })
+  const actx = { session: 's1' }
+  const ctx = {
+    get(name) {
+      if (name === 'sessions') return { scope: (id) => (id === 's1' ? actx : undefined) }
+      if (name === 'conversation') return { input: { for: () => ({ state: { getSnapshot: () => ({ draft: draft.value }) }, setDraft: (text) => { draft.value = text } }) } }
+      throw new Error(`no service ${name}`)
+    },
+  }
+  const pa = window.__pa
+  const surface = document.getElementById('surface')
+  const t = pa.makeT(pa.ZH)
+  const mode = new URLSearchParams(location.search).get('mode') ?? 'preview'
+  ReactDOM.createRoot(document.getElementById('action')).render(React.createElement(pa.AnnotateButton, {
+    ctx, scope: { sessionId: 's1', cwd: '/Users/me/dsh-plugin/page-annotate/tests/browser' },
+    path: '/Users/me/dsh-plugin/page-annotate/tests/browser/report.html', mode, visible: true, surface: () => surface, t,
+  }))
+</script>
+</body>
+</html>

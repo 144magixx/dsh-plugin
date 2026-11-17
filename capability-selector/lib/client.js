@@ -19,7 +19,57 @@ window.__ModuleLoader__.load({
     }
     Object.assign(ZH, { cardsGrip: '拖动调整顺序，点按查看选项', cardsHide: '隐藏「{name}」', cardsManage: '管理卡片…', cardsTitle: '卡片管理', cardsHint: '拖动卡片标题左侧的把手调整顺序', cardsHidden: '已隐藏 {count} 张卡片', cardsReset: '恢复默认', cardsDone: '完成', cardsToggle: '显示「{name}」' })
     Object.assign(EN, { cardsGrip: 'Drag to reorder, click for options', cardsHide: 'Hide “{name}”', cardsManage: 'Manage cards…', cardsTitle: 'Manage cards', cardsHint: 'Drag the handle left of a card title to reorder', cardsHidden: '{count} hidden cards', cardsReset: 'Restore defaults', cardsDone: 'Done', cardsToggle: 'Show “{name}”' })
+    Object.assign(ZH, { stackCollapse: '收起卡片栏', stackExpand: '显示卡片栏', stackEdge: '向右拖动收起卡片栏' })
+    Object.assign(EN, { stackCollapse: 'Collapse cards', stackExpand: 'Show cards', stackEdge: 'Drag right to collapse the cards' })
     function errorText(error) { return String(error?.message ?? error ?? '') }
+
+    // ----- Collapsing the whole stack to the right edge -----
+    // A separate record from the card layout: older versions rewrite that record
+    // without unknown fields, and ignore this one, so upgrades and downgrades are safe.
+    const STACK_KEY = 'dsh-capability-selector.stack.v1'
+    /** Root marker for companions (the summary releases its reserved column while it is present). */
+    const COLLAPSED_ATTR = 'data-dsh-card-stack-collapsed'
+    const SLIDE_MS = 220, RETURN_MS = 160, TITLE_BAND = 44, EDGE_ZONE = 16, EDGE_KEEP = 48, TAB_WIDTH = 20, TAB_HEIGHT = 56
+    function createStackState(storage = globalThis.localStorage) {
+      let state
+      try { state = { collapsed: JSON.parse(storage?.getItem(STACK_KEY) || '{}')?.collapsed === true } } catch { state = { collapsed: false } }
+      const listeners = new Set()
+      return {
+        getSnapshot: () => state,
+        subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn) },
+        setCollapsed(value) {
+          if (state.collapsed === (value === true)) return
+          state = { collapsed: value === true }
+          try { if (state.collapsed) storage?.setItem(STACK_KEY, JSON.stringify(state)); else storage?.removeItem(STACK_KEY) } catch { /* private mode: keep in memory */ }
+          for (const fn of [...listeners]) fn()
+        },
+      }
+    }
+    /** First decisive movement: a rightward drag collapses the stack; anything else is left alone. */
+    function slideAxis(dx, dy) {
+      if (Math.hypot(dx, dy) < 6) return null
+      return dx > 0 && dx > Math.abs(dy) * 1.2 ? 'right' : 'other'
+    }
+    /** Past half the stack's width, or a quick flick to the right, collapses; otherwise it springs back. */
+    function slideDecision(dx, width, velocity = 0) {
+      if (!(dx > 0)) return 'return'
+      return dx >= Math.max(1, width) / 2 || (velocity > 0.6 && dx > 24) ? 'collapse' : 'return'
+    }
+    /** Vertical band of the reveal tab, at the top of where the stack was. */
+    function edgeTabPlacement(dock, viewport) {
+      const { left: vx = 0, top: vy = 0, width: vw, height: vh } = viewport
+      const height = Math.max(1, Math.min(TAB_HEIGHT, vh - 24))
+      const top = clamp((dock?.top ?? vy + 60) + 8, vy + 12, vy + vh - height - 12)
+      const bandBottom = Math.max(top + height, Math.min(vy + vh, (dock?.top ?? top) + Math.max(dock?.height ?? 0, 160)))
+      return { left: vx + vw - TAB_WIDTH, top, width: TAB_WIDTH, height, band: { top: Math.min(top, dock?.top ?? top), bottom: bandBottom }, right: vx + vw }
+    }
+    /** Pointer near the right edge within the band shows the tab; leaving a wider margin hides it. */
+    function edgeHover(x, y, tab, shown) {
+      if (!tab) return false
+      const reach = shown ? EDGE_KEEP : EDGE_ZONE, pad = shown ? 24 : 0
+      return x >= tab.right - reach && y >= tab.band.top - pad && y <= tab.band.bottom + pad
+    }
+    const prefersReducedMotion = () => { try { return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true } catch { return false } }
 
     // ----- Generic card stack: order and visibility for every accessory card -----
     const LAYOUT_KEY = 'dsh-capability-selector.cards.v1'
@@ -95,7 +145,7 @@ window.__ModuleLoader__.load({
       return h('svg', { width: 8, height: 14, viewBox: '0 0 8 14', 'aria-hidden': true }, ...[[2, 2], [6, 2], [2, 7], [6, 7], [2, 12], [6, 12]].map(([cx, cy]) => h('circle', { key: `${cx}:${cy}`, cx, cy, r: 1.25, fill: 'currentColor' })))
     }
     const fill = (text, params) => String(text).replace(/\{(\w+)\}/g, (_, key) => params[key] ?? '')
-    function CardStack({ rows, layout, t, renderCard, dockRef }) {
+    function CardStack({ rows, layout, t, renderCard, dockRef, onSlide, onCollapse }) {
       const value = useStore(layout)
       const byId = new Map(rows.map(row => [row.id, row]))
       const all = arrangeCards(rows.map(row => row.id), value.order)
@@ -173,6 +223,12 @@ window.__ModuleLoader__.load({
         d.x = event.clientX; d.y = event.clientY
         if (!d.moved) {
           if (Math.hypot(d.x - d.startX, d.y - d.startY) < 4) return
+          // A rightward pull on the grip collapses the whole stack instead of reordering.
+          if (onSlide && slideAxis(d.x - d.startX, d.y - d.startY) === 'right') {
+            d.release?.(); active.current = null; setMenu(null)
+            onSlide({ pointerId: d.pointer, startX: d.startX, startY: d.startY, x: d.x, y: d.y })
+            return
+          }
           d.moved = true; setMenu(null); setManage(false)
           d.lifted = lift(d)
           setDrag({ id: d.id, target: latest.current.visible.indexOf(d.id) })
@@ -214,7 +270,8 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', className: 'dsc-grip', 'aria-label': `${label(id)} · ${t('cardsGrip')}`, title: t('cardsGrip'), 'aria-haspopup': 'menu', 'aria-expanded': menu === id, ...grip(id) }, h(GripIcon)),
             menu === id ? h('div', { className: 'dsc-card-menu', role: 'menu', 'data-dsc-card-menu': '' },
               h('button', { type: 'button', role: 'menuitem', onClick: () => { setMenu(null); layout.set({ hidden: [...value.hidden, id] }) } }, fill(t('cardsHide'), { name: label(id) })),
-              h('button', { type: 'button', role: 'menuitem', onClick: () => { setMenu(null); setManage(true) } }, t('cardsManage'))) : null,
+              h('button', { type: 'button', role: 'menuitem', onClick: () => { setMenu(null); setManage(true) } }, t('cardsManage')),
+              onCollapse ? h('button', { type: 'button', role: 'menuitem', onClick: () => { setMenu(null); onCollapse() } }, t('stackCollapse')) : null) : null,
             h('div', { className: 'dsc-card-content' }, renderCard(id))))),
         manage ? h('section', { className: 'dsc-manage', 'aria-label': t('cardsTitle') },
           h('div', { className: 'dsc-manage-head' }, t('cardsTitle')),
@@ -353,18 +410,26 @@ window.__ModuleLoader__.load({
 .dsc-manage{flex:none;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l3,var(--dsc-border));border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-alias-bg-layer-1,var(--dsc-bg))}.dsc-manage-head{font-weight:600}.dsc-manage-hint{margin:2px 0 6px;font-size:11px;color:var(--dsc-muted)}.dsc-manage ul{list-style:none;margin:0;padding:0}.dsc-manage li{display:flex;align-items:center;gap:8px;min-height:34px;border-top:1px solid var(--dsc-border)}.dsc-manage li:first-child{border-top:0}.dsc-manage li>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsc-manage-actions{display:flex;justify-content:space-between;margin-top:6px}.dsc-manage-done{color:#007AFF!important}
 .dsc-switch{position:relative;flex:none;width:34px;height:20px;border:0;border-radius:10px;padding:0;background:var(--dsw-alias-bg-layer-3,#d1d1d6)}.dsc-switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #00000033;transition:left .15s}.dsc-switch[aria-checked=true]{background:#34C759}.dsc-switch[aria-checked=true]::after{left:16px}
 .dsc-cards-hidden{flex:none;align-self:center;border:0;background:transparent;color:var(--dsc-muted);font-size:11px!important;padding:2px 8px;border-radius:6px}.dsc-cards-hidden:hover{color:var(--dsc-text);background:var(--dsc-hover)}
-@media(prefers-reduced-motion:reduce){.dsc-card-body,.dsc-grip,.dsc-switch::after{transition:none}}
+.dsc-stack-edge{position:fixed;z-index:38;cursor:grab;touch-action:none;pointer-events:auto;-webkit-app-region:no-drag}
+.dsc-stack-edge::after{content:"";position:absolute;left:3px;top:50%;width:4px;height:36px;max-height:70%;transform:translateY(-50%);border-radius:2px;background:var(--dsc-muted);opacity:0;transition:opacity .15s}
+.dsc-stack-edge:hover::after,.dsc-dock[data-sliding]~.dsc-stack-edge::after{opacity:.45}
+.dsc-dock[data-sliding],.dsc-dock[data-sliding] *{cursor:grabbing!important}
+.dsc-stack-tab{position:fixed;z-index:39;display:flex;align-items:center;justify-content:center;padding:0;border:.5px solid color-mix(in srgb,var(--dsc-border) 80%,transparent);border-right:0;border-radius:10px 0 0 10px;background:color-mix(in srgb,var(--dsw-alias-bg-layer-1,#fff) 55%,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);color:var(--dsc-muted);box-shadow:-2px 2px 10px #0000001a;opacity:0;transform:translateX(8px);pointer-events:none;transition:opacity .16s ease,transform .16s ease;-webkit-app-region:no-drag}
+.dsc-stack-tab[data-shown],.dsc-stack-tab:focus-visible{opacity:1;transform:none;pointer-events:auto}.dsc-stack-tab:hover{color:var(--dsc-text);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1,#fff) 82%,transparent)}
+@media(hover:none){.dsc-stack-tab{opacity:.7;transform:none;pointer-events:auto}}
+@media(prefers-reduced-motion:reduce){.dsc-card-body,.dsc-grip,.dsc-switch::after,.dsc-stack-tab,.dsc-stack-edge::after{transition:none}}
 @media(max-width:759px){.dsc-panel-body{grid-template-columns:minmax(0,1fr)}.dsc-detail{display:none;border-left:0}.dsc-panel[data-detail=true] .dsc-list{display:none}.dsc-panel[data-detail=true] .dsc-detail{display:block}.dsc-mobile-back{display:inline-flex}.dsc-subtitle{display:none}.dsc-head{padding:12px 12px 9px}.dsc-search-wrap{padding:0 12px 9px}.dsc-toolbar{padding:0 12px 9px;gap:5px}.dsc-tabs{min-width:100%;flex:none}.dsc-tab{padding:4px 8px}.dsc-footer{padding:9px 12px;gap:6px}.dsc-add{padding:8px 10px}.dsc-copy{display:none}.dsc-footnote{padding:0 12px 7px}.dsc-row-source{max-width:72px}.dsc-source-select{max-width:155px}.dsc-controls{gap:5px}}
 @media(max-height:480px){.dsc-head{padding:6px 12px}.dsc-head-icon,.dsc-subtitle,.dsc-footnote,.dsc-chips,.dsc-ready{display:none}.dsc-heading h2{font-size:15px}.dsc-search-wrap{padding:0 12px 5px}.dsc-search{height:30px}.dsc-toolbar{padding:0 12px 5px;gap:3px}.dsc-tabs{min-width:0}.dsc-source-select{display:none}.dsc-footer{padding:5px 12px}.dsc-add{padding:5px 10px}.dsc-feedback{max-height:45px;padding:4px 12px}}
 @media(max-height:360px){.dsc-trigger{padding:6px 10px}.dsc-card-hint{display:none}.dsc-card-stats{margin-top:3px}}
 @media(max-height:280px){.dsc-trigger{padding:3px 8px}.dsc-card-stats,.dsc-card-hint{display:none}.dsc-head{padding:0 12px;height:22px;min-height:0}.dsc-head .dsc-plain{padding:0 6px;height:20px;min-height:0;line-height:18px}.dsc-heading h2{font-size:13px;line-height:20px}.dsc-search-wrap{padding-bottom:3px}.dsc-search{height:24px;min-height:0}.dsc-toolbar{padding-bottom:3px}.dsc-tab{padding:2px 6px;height:24px;min-height:0}.dsc-footer{padding:3px 12px}.dsc-footer button{min-height:0}.dsc-copy{display:none}.dsc-feedback{max-height:28px}.dsc-list{padding:2px 6px}.dsc-row{min-height:38px;padding:3px 6px}.dsc-entry-description,.dsc-row-source{display:none}}
 `
     function useStore(store) { return React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot) }
-    function useFixedPosition(ref, target) {
+    /** `shiftRef` holds a horizontal slide applied as a transform, excluded from the measurement. */
+    function useFixedPosition(ref, target, shiftRef) {
       const [offset, setOffset] = React.useState({ x: 0, y: 0 })
       React.useLayoutEffect(() => {
         if (!ref.current || !target) return
-        const rect = ref.current.getBoundingClientRect(), dx = target.left - rect.left, dy = target.top - rect.top
+        const rect = ref.current.getBoundingClientRect(), dx = target.left - (rect.left - (shiftRef?.current ?? 0)), dy = target.top - rect.top
         if (Math.abs(dx) > .5 || Math.abs(dy) > .5) setOffset(old => ({ x: old.x + dx, y: old.y + dy }))
       }, [ref, target?.left, target?.top, target?.width, target?.height])
       return target ? { left: target.left + offset.x, top: target.top + offset.y, width: target.width, height: target.height } : { visibility: 'hidden', left: 0, top: 0 }
@@ -393,7 +458,7 @@ window.__ModuleLoader__.load({
     }
     /** Beside an expanded right sidebar the dock shows only with a summary card the user revealed there. */
     function dockHidden(sidebarOpen, summaryShown) { return sidebarOpen === true && !summaryShown }
-    function useDockGeometry(sessionId, anchors, dockRef, sidebarOpen = false) {
+    function useDockGeometry(sessionId, anchors, dockRef, sidebarOpen = false, collapsed = false) {
       const [geometry, setGeometry] = React.useState(null)
       React.useLayoutEffect(() => {
         if (!sessionId) { setGeometry(null); return }
@@ -431,13 +496,16 @@ window.__ModuleLoader__.load({
             return
           }
           const viewport = viewportOf(window), dock = dockPlacement(summary?.getBoundingClientRect(), header?.getBoundingClientRect(), viewport, ownDock?.getBoundingClientRect().height)
-          const reserve = `${Math.ceil(dock.height) + RESERVE_GAP}px`
-          writtenReserve = reserve
-          if (root.style.getPropertyValue('--dsh-summary-accessory-height') !== reserve) {
-            root.style.setProperty('--dsh-summary-accessory-height', reserve)
-            window.dispatchEvent(new Event('dsh:summary-accessory-change'))
+          if (collapsed) releaseReserve()
+          else {
+            const reserve = `${Math.ceil(dock.height) + RESERVE_GAP}px`
+            writtenReserve = reserve
+            if (root.style.getPropertyValue('--dsh-summary-accessory-height') !== reserve) {
+              root.style.setProperty('--dsh-summary-accessory-height', reserve)
+              window.dispatchEvent(new Event('dsh:summary-accessory-change'))
+            }
           }
-          const next = { dock, viewport, panel: panelPlacement(dock, viewport) }
+          const next = { dock, viewport, panel: panelPlacement(dock, viewport), tab: edgeTabPlacement(dock, viewport) }
           setGeometry(old => JSON.stringify(old) === JSON.stringify(next) ? old : next)
         }
         function schedule() { if (!stopped) { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure) } }
@@ -452,7 +520,7 @@ window.__ModuleLoader__.load({
           window.visualViewport?.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('scroll', schedule)
           releaseReserve()
         }
-      }, [sessionId, anchors, dockRef, sidebarOpen])
+      }, [sessionId, anchors, dockRef, sidebarOpen, collapsed])
       return geometry
     }
     function CapabilityAnchor({ sessionId, anchors }) {
@@ -539,9 +607,135 @@ window.__ModuleLoader__.load({
     }
     const CLOSED_SIDEBAR = Object.freeze({ subscribe: () => () => {}, read: () => false })
     const NO_CARDS = Object.freeze({ subscribe: () => () => {}, read: () => null })
-    function CapabilityOverlay({ api, anchors, uiSession, sessions, t, renderSlot = () => null, sidebar = CLOSED_SIDEBAR, cardSource = NO_CARDS, cardLayout }) {
+    const NO_SLIDE = '.dsc-grip, [data-dsc-card-menu], .dsc-manage, .dsc-cards-hidden, input, textarea, select, [contenteditable]:not([contenteditable="false"]), [data-dsc-no-slide]'
+    /** Horizontal slide of the whole stack: drag right to collapse, the edge tab brings it back. */
+    function useStackSlide({ dockRef, edgeRef, shift, dockElement, stackState, collapsed, onStart }) {
+      const slide = React.useRef(null), pending = React.useRef(null), animate = React.useRef(false), timer = React.useRef(0)
+      const collapsedRef = React.useRef(collapsed)
+      collapsedRef.current = collapsed
+      const startRef = React.useRef(onStart)
+      startRef.current = onStart
+      const apply = React.useCallback((x, ms) => {
+        shift.current = x
+        for (const element of [dockRef.current, edgeRef.current]) {
+          if (!element) continue
+          element.style.transition = ms ? `transform ${ms}ms cubic-bezier(.2,.8,.2,1)` : 'none'
+          element.style.transform = x ? `translate3d(${Math.round(x)}px,0,0)` : ''
+        }
+      }, [dockRef, edgeRef])
+      const offscreen = React.useCallback(() => {
+        const element = dockRef.current
+        if (!element) return 0
+        const viewport = viewportOf(window), left = element.getBoundingClientRect().left - shift.current
+        return Math.max(0, viewport.left + viewport.width - left + 16)
+      }, [dockRef])
+      const setVisible = visible => { for (const element of [dockRef.current, edgeRef.current]) if (element) element.style.visibility = visible ? '' : 'hidden' }
+      // Collapse and expand; the dock's ref callback has already reset the shift for a new element.
+      React.useLayoutEffect(() => {
+        const dock = dockElement
+        if (!dock) return
+        clearTimeout(timer.current)
+        const ms = animate.current && !prefersReducedMotion() ? SLIDE_MS : 0
+        animate.current = false
+        for (const element of [dock, edgeRef.current]) if (element) { try { element.inert = collapsed } catch { /* older engines: aria-hidden still applies */ } }
+        if (collapsed) {
+          setVisible(true)
+          apply(offscreen(), ms)
+          if (ms) timer.current = setTimeout(() => { if (collapsedRef.current) setVisible(false) }, ms + 20); else setVisible(false)
+        } else {
+          setVisible(true)
+          if (ms && shift.current === 0) { apply(offscreen(), 0); void dock.getBoundingClientRect() }
+          apply(0, ms)
+        }
+      }, [collapsed, dockElement, apply, offscreen, edgeRef])
+      const begin = React.useCallback(start => {
+        const dock = dockRef.current
+        if (!dock || slide.current || collapsedRef.current) return
+        clearTimeout(timer.current)
+        const doc = dock.ownerDocument, root = doc.documentElement, previousSelect = root.style.userSelect
+        const s = slide.current = { pointerId: start.pointerId, startX: start.startX, width: dock.getBoundingClientRect().width, dx: 0, lastX: start.x, lastT: performance.now(), velocity: 0 }
+        startRef.current?.()
+        root.style.userSelect = 'none'
+        try { doc.getSelection?.()?.removeAllRanges() } catch { /* nothing selected */ }
+        dock.setAttribute('data-sliding', '')
+        const move = event => {
+          if (event.pointerId !== s.pointerId) return
+          event.preventDefault?.()
+          const raw = event.clientX - s.startX, now = performance.now(), dt = now - s.lastT
+          if (dt > 0) s.velocity = s.velocity * 0.5 + ((event.clientX - s.lastX) / dt) * 0.5
+          s.lastX = event.clientX; s.lastT = now
+          // Rubber-band the wrong direction so the stack never drifts over the conversation.
+          s.dx = raw >= 0 ? raw : Math.max(-12, raw / 4)
+          apply(s.dx, 0)
+        }
+        const swallow = event => { event.preventDefault(); event.stopPropagation() }
+        const end = commit => {
+          cleanup()
+          if (performance.now() - s.lastT > 90) s.velocity = 0
+          if (commit && slideDecision(s.dx, s.width, s.velocity) === 'collapse') { animate.current = true; stackState.setCollapsed(true) }
+          else apply(0, prefersReducedMotion() ? 0 : RETURN_MS)
+          // The release would otherwise click whatever title the drag started on.
+          if (Math.abs(s.dx) > 3) { window.addEventListener('click', swallow, true); setTimeout(() => window.removeEventListener('click', swallow, true), 0) }
+        }
+        const up = event => { if (event.pointerId === s.pointerId) end(true) }
+        const cancel = event => { if (event.pointerId === undefined || event.pointerId === s.pointerId) end(false) }
+        const key = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); end(false) } }
+        const blur = () => end(false)
+        function cleanup() {
+          window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', up, true); window.removeEventListener('pointercancel', cancel, true); window.removeEventListener('keydown', key, true); window.removeEventListener('blur', blur)
+          root.style.userSelect = previousSelect; dock.removeAttribute('data-sliding')
+          if (slide.current === s) slide.current = null
+        }
+        s.cancel = () => { cleanup(); apply(0, 0) }
+        window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', cancel, true); window.addEventListener('keydown', key, true); window.addEventListener('blur', blur)
+        move({ pointerId: s.pointerId, clientX: start.x })
+      }, [dockRef, apply, stackState])
+      /** Title-band presses become a slide only once the pointer clearly heads right; clicks are untouched. */
+      const onPointerDownCapture = React.useCallback(event => {
+        if (collapsedRef.current || slide.current || pending.current || event.button !== 0 || event.isPrimary === false) return
+        const target = event.target
+        if (typeof target?.closest !== 'function' || target.closest(NO_SLIDE)) return
+        const card = target.closest('.dsc-card-body, .dsc-controls, .dsc-accessories > *')
+        if (!card || !dockRef.current?.contains(card) || event.clientY - card.getBoundingClientRect().top > TITLE_BAND) return
+        const p = pending.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY }
+        const stop = () => {
+          window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', stop, true); window.removeEventListener('pointercancel', stop, true); window.removeEventListener('dragstart', drag, true)
+          if (pending.current === p) pending.current = null
+        }
+        const move = next => {
+          if (next.pointerId !== p.pointerId) return
+          const axis = slideAxis(next.clientX - p.startX, next.clientY - p.startY)
+          if (!axis) return
+          stop()
+          if (axis === 'right') begin({ ...p, x: next.clientX, y: next.clientY })
+        }
+        // A link or image in a title would start a native drag and swallow the pointer stream.
+        const drag = next => { if (dockRef.current?.contains(next.target)) next.preventDefault() }
+        p.stop = stop
+        window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', stop, true); window.addEventListener('pointercancel', stop, true); window.addEventListener('dragstart', drag, true)
+      }, [dockRef, begin])
+      const edgeHandlers = React.useMemo(() => ({
+        onPointerDown(event) {
+          if (event.button !== 0 || event.isPrimary === false) return
+          event.preventDefault()
+          begin({ pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY })
+        },
+      }), [begin])
+      const collapse = React.useCallback(() => { if (!slide.current) { animate.current = true; stackState.setCollapsed(true) } }, [stackState])
+      const expand = React.useCallback(() => { animate.current = true; stackState.setCollapsed(false) }, [stackState])
+      React.useEffect(() => () => { clearTimeout(timer.current); slide.current?.cancel?.(); pending.current?.stop?.() }, [])
+      /** Keep a collapsed stack just past the edge when the window or its column moves. */
+      const reposition = React.useCallback(() => { if (collapsedRef.current && !slide.current && dockRef.current) apply(offscreen(), 0) }, [apply, offscreen, dockRef])
+      return { shift, begin, onPointerDownCapture, edgeHandlers, collapse, expand, reposition }
+    }
+    function ChevronLeft() {
+      return h('svg', { width: 12, height: 12, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }, h('path', { d: 'm15 5-7 7 7 7' }))
+    }
+    const MEMORY_STACK = createStackState(null)
+    function CapabilityOverlay({ api, anchors, uiSession, sessions, t, renderSlot = () => null, sidebar = CLOSED_SIDEBAR, cardSource = NO_CARDS, cardLayout, stackState = MEMORY_STACK }) {
       const active = useStore(uiSession.current), state = useStore(api)
       const slotRows = React.useSyncExternalStore(cardSource.subscribe, cardSource.read, cardSource.read)
+      const collapsed = useStore(stackState).collapsed
       const sessionId = active?.key
       React.useLayoutEffect(() => { api.setSession(sessionId, sessionId ? sessions.binding(sessionId) : undefined) }, [api, sessions, sessionId, active?.ctx])
       React.useEffect(() => {
@@ -549,23 +743,59 @@ window.__ModuleLoader__.load({
         if (sessionId && current.sessionId === sessionId && current.status === 'idle') void api.scan()
       }, [api, sessionId, state.sessionId, state.status])
       const sidebarOpen = React.useSyncExternalStore(sidebar.subscribe, sidebar.read, sidebar.read)
-      const triggerRef = React.useRef(null), dockRef = React.useRef(null)
-      const geometry = useDockGeometry(sessionId, anchors, dockRef, sidebarOpen)
+      const triggerRef = React.useRef(null), dockRef = React.useRef(null), edgeRef = React.useRef(null)
+      const [dockElement, setDockElement] = React.useState(null)
+      // A new dock starts untransformed; reset before any layout effect measures it.
+      const shiftRef = React.useRef(0)
+      const attachDock = React.useCallback(element => { if (element !== dockRef.current) shiftRef.current = 0; dockRef.current = element; setDockElement(element) }, [])
+      const geometry = useDockGeometry(sessionId, anchors, dockRef, sidebarOpen, collapsed)
       const hidden = geometry?.hidden === true
-      const dockStyle = { ...useFixedPosition(dockRef, geometry?.dock), height: 'auto', maxHeight: geometry?.dock?.maxHeight }
+      const shown = Boolean(sessionId && geometry && !hidden)
+      const slide = useStackSlide({ dockRef, edgeRef, shift: shiftRef, dockElement: shown ? dockElement : null, stackState, collapsed, onStart: () => api.close() })
+      const dock = geometry?.dock
+      const dockStyle = { ...useFixedPosition(dockRef, dock, slide.shift), height: 'auto', maxHeight: dock?.maxHeight }
+      // The edge strip and the tab share the dock's containing block, so they reuse its compensation.
+      const ox = dock && Number.isFinite(dockStyle.left) ? dockStyle.left - dock.left : 0, oy = dock && Number.isFinite(dockStyle.top) ? dockStyle.top - dock.top : 0
+      const edgeStyle = dock ? { left: dock.left - 10 + ox, top: dock.top + oy, width: 10, height: dock.height } : { visibility: 'hidden', left: 0, top: 0 }
+      const tab = geometry?.tab
+      const tabStyle = tab ? { left: tab.left + ox, top: tab.top + oy, width: tab.width, height: tab.height } : undefined
+      const [tabShown, setTabShown] = React.useState(false)
+      const viewportWidth = geometry?.viewport?.width
+      React.useLayoutEffect(() => { slide.reposition() }, [slide.reposition, dockStyle.left, viewportWidth])
       React.useEffect(() => { if (!state.notice || state.open) return; const timer = setTimeout(() => api.set({ notice: '' }), 4000); return () => clearTimeout(timer) }, [api, state.notice, state.open])
-      // A panel left open would otherwise pop back when the sidebar closes.
-      React.useEffect(() => { if (hidden && state.open) api.close() }, [api, hidden, state.open])
-      if (!sessionId || !geometry || hidden) return null
+      // A panel left open would otherwise pop back when the sidebar closes or the stack returns.
+      React.useEffect(() => { if ((hidden || collapsed) && state.open) api.close() }, [api, hidden, collapsed, state.open])
+      // Tell companions the column is free; restored on expand, hide or unmount.
+      React.useLayoutEffect(() => {
+        if (!collapsed || !shown) return
+        const root = document.documentElement
+        root.setAttribute(COLLAPSED_ATTR, '')
+        window.dispatchEvent(new Event('dsh:summary-accessory-change'))
+        return () => { root.removeAttribute(COLLAPSED_ATTR); window.dispatchEvent(new Event('dsh:summary-accessory-change')) }
+      }, [collapsed, shown])
+      const tabKey = tab ? `${tab.right}:${tab.band.top}:${tab.band.bottom}` : ''
+      React.useEffect(() => {
+        setTabShown(false)
+        if (!collapsed || !shown || !tab) return
+        let visible = false
+        const update = next => { if (next !== visible) { visible = next; setTabShown(next) } }
+        const move = event => update(edgeHover(event.clientX, event.clientY, tab, visible))
+        const leave = () => update(false)
+        window.addEventListener('pointermove', move, { passive: true }); window.addEventListener('blur', leave); document.documentElement.addEventListener('pointerleave', leave)
+        return () => { window.removeEventListener('pointermove', move); window.removeEventListener('blur', leave); document.documentElement.removeEventListener('pointerleave', leave) }
+      }, [collapsed, shown, tabKey])
+      if (!shown) return null
       const card = h('div', { className: 'dsc-controls' }, h(CapabilityCard, { api, state, t, triggerRef }))
       // Hosts that cannot enumerate the slot keep the fixed order.
       const stack = slotRows && cardLayout
-        ? h(CardStack, { rows: [{ id: NAME, order: 0, label: () => t('title') }, ...slotRows].sort((a, b) => a.order - b.order), layout: cardLayout, t, dockRef, renderCard: id => id === NAME ? card : renderSlot(ACCESSORIES, { sessionId }, { only: id }) })
+        ? h(CardStack, { rows: [{ id: NAME, order: 0, label: () => t('title') }, ...slotRows].sort((a, b) => a.order - b.order), layout: cardLayout, t, dockRef, onSlide: slide.begin, onCollapse: slide.collapse, renderCard: id => id === NAME ? card : renderSlot(ACCESSORIES, { sessionId }, { only: id }) })
         : h(React.Fragment, null, card, h('div', { className: 'dsc-accessories' }, renderSlot(ACCESSORIES, { sessionId })))
       return h('div', { className: 'dsc-root', 'data-dsh-capability-selector': '' },
-        h('div', { ref: dockRef, className: 'dsc-dock', style: dockStyle },
+        h('div', { ref: attachDock, className: 'dsc-dock', style: dockStyle, 'data-collapsed': collapsed ? '' : undefined, 'aria-hidden': collapsed ? true : undefined, onPointerDownCapture: slide.onPointerDownCapture },
           stack,
           !state.open && state.notice ? h('div', { className: 'dsc-dock-notice', role: 'status' }, state.notice) : null),
+        h('div', { className: 'dsc-stack-edge', ref: edgeRef, 'data-dsc-stack-edge': '', 'aria-hidden': true, title: t('stackEdge'), style: edgeStyle, ...slide.edgeHandlers }),
+        collapsed ? h('button', { type: 'button', className: 'dsc-stack-tab', 'data-dsc-stack-tab': '', 'data-shown': tabShown ? '' : undefined, 'aria-label': t('stackExpand'), title: t('stackExpand'), style: tabStyle, onClick: () => { setTabShown(false); slide.expand() } }, h(ChevronLeft)) : null,
         state.open && state.sessionId === sessionId ? h(CapabilityPanel, { key: sessionId, api, state, t, placement: geometry.panel, triggerRef }) : null)
     }
     function apply(ctx) {
@@ -579,10 +809,10 @@ window.__ModuleLoader__.load({
       // Optional service: read lazily so plugin load order never matters.
       const sidebarRight = () => { try { return ctx.get?.('sidebarRight') } catch { return undefined } }
       const sidebar = { read: () => rightSidebarExpanded(sidebarRight(), globalThis.document), subscribe: listener => watchRightSidebar(sidebarRight(), listener, globalThis.document) }
-      const cardSource = slotCardSource(ctx.slots), cardLayout = createCardLayout()
+      const cardSource = slotCardSource(ctx.slots), cardLayout = createCardLayout(), stackState = createStackState()
       ctx.effect(() => ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({ name: 'conversation.session.header.utilities', id: `${NAME}.anchor`, order: 110, locale: NS, label, inject: () => ({ anchors }) }, CapabilityAnchor)))
-      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: `${NAME}.overlay`, order: 50, locale: NS, label, children: { [ACCESSORIES]: { kind: 'list', scope: 'root' } }, inject: () => ({ api, anchors, uiSession: ctx.uiSession, sessions: ctx.sessions, sidebar, cardSource, cardLayout }) }, CapabilityOverlay)))
+      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: `${NAME}.overlay`, order: 50, locale: NS, label, children: { [ACCESSORIES]: { kind: 'list', scope: 'root' } }, inject: () => ({ api, anchors, uiSession: ctx.uiSession, sessions: ctx.sessions, sidebar, cardSource, cardLayout, stackState }) }, CapabilityOverlay)))
     }
-    return { name: NAME, inject: ['slots', 'locale', 'uiSession', 'sessions', 'conversation'], apply, createController, createStore, createCardLayout, arrangeCards, moveCard, commitOrder, slotCardSource, cardLabel, CardStack, LAYOUT_KEY, dockPlacement, useDockGeometry, rightSidebarExpanded, watchRightSidebar, dockHidden, ACCESSORIES, panelPlacement, filterItems, buildSelectionText, requestJSON, CSS, ZH, EN, CapabilityPanel, CapabilityCard, CapabilityOverlay, CapabilityAnchor, Details }
+    return { name: NAME, inject: ['slots', 'locale', 'uiSession', 'sessions', 'conversation'], apply, createController, createStore, createCardLayout, arrangeCards, moveCard, commitOrder, slotCardSource, cardLabel, CardStack, LAYOUT_KEY, STACK_KEY, COLLAPSED_ATTR, createStackState, slideAxis, slideDecision, edgeTabPlacement, edgeHover, useStackSlide, dockPlacement, useDockGeometry, rightSidebarExpanded, watchRightSidebar, dockHidden, ACCESSORIES, panelPlacement, filterItems, buildSelectionText, requestJSON, CSS, ZH, EN, CapabilityPanel, CapabilityCard, CapabilityOverlay, CapabilityAnchor, Details }
   },
 })

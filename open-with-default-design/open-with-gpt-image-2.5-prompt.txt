@@ -1,0 +1,23 @@
+A clean, high-fidelity UI design mockup (flat product screenshot style, light theme, crisp Simplified Chinese text, no device frame) of the right sidebar of a desktop AI coding app, focusing on the file editor tab. 3:2 landscape, the sidebar shown large and centered on a light gray canvas.
+
+Sidebar top: a tab strip with tabs "文件", "变更", "任务", the "文件" tab active.
+Below it, the editor header row, left to right: a file path input showing "report/joyrisk.html"; a segmented toggle "预览 | 编辑" with "预览" selected; a refresh icon button; a folder icon button. At the far RIGHT end of the header row is the NEW element, emphasized: a split button. Left part shows the VS Code logo and the text "打开"; right part is a small chevron "▾" separated by a thin vertical divider. The split button has a subtle blue ring to show it is the new feature.
+
+The chevron is clicked, so a dropdown menu is open below the split button, aligned to the right edge, white card with soft shadow, 8px radius. Menu contents:
+- Small gray section label "默认打开方式"
+- Row: VS Code logo, "VS Code", a blue check mark at the right (selected default)
+- Row: Cursor logo, "Cursor"
+- Row: Zed logo, "Zed"
+- Row: browser globe icon, "浏览器"
+- Row: folder icon, "访达（在 Finder 中显示）"
+- Row: generic editor icon, "IntelliJ IDEA（自定义）"
+- thin divider
+- Row: checkbox (checked) "仅对 .html 文件生效"
+- Row: gear icon, "管理打开方式…"
+Small helper caption under the menu in gray: "单击「打开」直接用默认方式打开当前文件；▾ 切换默认".
+
+Below the header, the editor body shows a rendered HTML page preview with a big bold title "JoyRisk 能力调研报告" and gray paragraph lines, partially covered by the dropdown.
+
+Optionally, a small callout arrow annotation on the canvas pointing to the split button with text "新增：右上角一键打开 + 选择默认方式".
+
+Style: modern, minimal, brand blue #2563EB accents, neutral grays, subtle borders, legible typography, accurate Simplified Chinese text exactly as specified. No watermark.

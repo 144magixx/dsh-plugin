@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Upload Slim",
+    "description": "Shrink images sent to models when upload is slow: strategy presets, real before/after previews, one switch to restore; tells the Agent images are lossy previews."
+  }
+}

@@ -640,6 +640,11 @@ window.__ModuleLoader__.load({
       }
       return () => { for (const stop of stops.splice(0)) { try { stop() } catch { /* already released */ } } }
     }
+    /** Root marker set by the card stack (capability-selector 0.4+) while it is collapsed to the right edge. */
+    const STACK_COLLAPSED_ATTR = 'data-dsh-card-stack-collapsed'
+    function stackCollapsedWith(api, sessionId, doc = globalThis.document) {
+      return Boolean(doc?.documentElement?.hasAttribute?.(STACK_COLLAPSED_ATTR)) && api.ui.getSnapshot().docked === sessionId
+    }
     /** Optional companion plugins reserve space below the summary, never inside its scroller. */
     function summaryAccessoryHeight() {
       if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return 0
@@ -1177,7 +1182,8 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
         }
         const place = () => {
           const anchor = summaryLayout(header.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, !content)
-          if (content && anchor.layout !== 'floating') {
+          // A card stack collapsed to the window edge takes this seated card with it: the column is free.
+          if (content && anchor.layout !== 'floating' && !stackCollapsedWith(api, sessionId)) {
             content.classList.add('dss-conversation-layout')
             content.style.setProperty('--dss-side-space', `${anchor.layout === 'side' ? anchor.width + 24 : 0}px`)
             content.style.setProperty('--dss-top-space', `${anchor.layout === 'stack' ? Math.min(cardHeightRef.current, anchor.maxHeight) + summaryAccessoryHeight() + 20 : 0}px`)
@@ -1287,7 +1293,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
           const target = event.target
           if (cardRef.current?.contains?.(target) || target?.closest?.('[data-dsh-session-summary-toggle]')) return
           // Reordering the stack is not a dismissal.
-          if (docked && target?.closest?.('[data-dsc-card-menu], .dsc-grip, .dsc-manage')) return
+          if (docked && target?.closest?.('[data-dsc-card-menu], .dsc-grip, .dsc-manage, [data-dsc-stack-edge], [data-dsc-stack-tab]')) return
           close()
         }
         document.addEventListener('pointerdown', onPointerDown, true)
@@ -1532,7 +1538,7 @@ button.dss-row:hover,button.dss-row:focus-visible{background:var(--dsw-alias-int
       // Pure helpers exported for the package's own tests.
       deriveChat, aggregateChanges, deriveSubagents, deriveRelated, deriveJobs, deriveTodos, planModeActive, fileReferences, parseMcpName, callInfo,
       fileAddressFor, changesReviewAddress, subagentChatAddress, planAddress, changesSummaryUrl, formatDuration, formatTokens, basename, hostOf, displayPath,
-      createStore, sanitizePrefs, sanitizePosition, cardPlacement, summaryLayout, summaryAccessoryHeight, createSummaryCache, createApi, rightSidebarExpanded, watchRightSidebar, SummaryCard, SummaryCardHost, SummaryAccessory, SummaryOverlay, SummaryToggle, ACCESSORY_SLOT, SummaryData, ApiContext,
+      createStore, sanitizePrefs, sanitizePosition, cardPlacement, summaryLayout, summaryAccessoryHeight, stackCollapsedWith, STACK_COLLAPSED_ATTR, createSummaryCache, createApi, rightSidebarExpanded, watchRightSidebar, SummaryCard, SummaryCardHost, SummaryAccessory, SummaryOverlay, SummaryToggle, ACCESSORY_SLOT, SummaryData, ApiContext,
       HOST_ICONS, ZH, EN, CSS, SLOT, ENTRY_ID, OVERLAY_SLOT, OVERLAY_ID, STORAGE_KEY, SECTION_IDS
     }
   }

@@ -68,3 +68,56 @@ test('the stack renders every visible card with a grip, and the hidden-card entr
   assert.match(html, /已隐藏 1 张卡片 · 管理卡片/);
   assert.doesNotMatch(html, /card:guard/);
 });
+
+test('collapse state uses its own record, so older versions neither lose nor misread it', () => {
+  const map = new Map([[c.LAYOUT_KEY, JSON.stringify({ order: ['a'], hidden: [] })]]);
+  const storage = { getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), removeItem: key => map.delete(key) };
+  assert.notEqual(c.STACK_KEY, c.LAYOUT_KEY);
+  const stack = c.createStackState(storage);
+  assert.equal(stack.getSnapshot().collapsed, false);
+  let changes = 0; stack.subscribe(() => changes++);
+  stack.setCollapsed(true); stack.setCollapsed(true);
+  assert.equal(changes, 1, 'repeated values do not notify');
+  assert.deepEqual(JSON.parse(map.get(c.STACK_KEY)), { collapsed: true });
+  assert.deepEqual(JSON.parse(map.get(c.LAYOUT_KEY)), { order: ['a'], hidden: [] }, 'card layout record untouched');
+  assert.equal(c.createStackState(storage).getSnapshot().collapsed, true, 'survives reload');
+  c.createCardLayout(storage).set({ hidden: ['x'] });
+  assert.equal(c.createStackState(storage).getSnapshot().collapsed, true, 'rewriting the layout keeps the collapse');
+  stack.setCollapsed(false);
+  assert.equal(map.has(c.STACK_KEY), false, 'expanded is the default and leaves no record');
+  for (const raw of ['{oops', '{"collapsed":"yes"}', 'null']) assert.equal(c.createStackState({ getItem: () => raw }).getSnapshot().collapsed, false);
+  const failing = c.createStackState({ getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } });
+  failing.setCollapsed(true);
+  assert.equal(failing.getSnapshot().collapsed, true, 'kept in memory when storage is unavailable');
+  assert.equal(c.createStackState(null).getSnapshot().collapsed, false);
+});
+
+test('only a clearly rightward drag slides, and half the width decides collapse or spring back', () => {
+  assert.equal(c.slideAxis(3, 1), null, 'below the threshold nothing is decided');
+  assert.equal(c.slideAxis(12, 4), 'right');
+  assert.equal(c.slideAxis(8, 8), 'other', 'diagonal stays with reorder/scroll');
+  assert.equal(c.slideAxis(0, 12), 'other');
+  assert.equal(c.slideAxis(-12, 0), 'other');
+  assert.equal(c.slideDecision(159, 320), 'return');
+  assert.equal(c.slideDecision(160, 320), 'collapse');
+  assert.equal(c.slideDecision(40, 320, 1.2), 'collapse', 'a quick flick collapses');
+  assert.equal(c.slideDecision(20, 320, 1.2), 'return', 'a tiny flick does not');
+  assert.equal(c.slideDecision(-30, 320, 2), 'return');
+  assert.equal(c.slideDecision(NaN, 320), 'return');
+});
+
+test('the reveal tab sits at the right edge beside the former stack and only nearby pointers show it', () => {
+  const viewport = { left: 0, top: 0, width: 1400, height: 900 };
+  const tab = c.edgeTabPlacement({ left: 1060, top: 70, width: 320, height: 500 }, viewport);
+  assert.equal(tab.left + tab.width, 1400);
+  assert.equal(tab.top, 78);
+  assert.deepEqual(plain(tab.band), { top: 70, bottom: 570 });
+  assert.equal(c.edgeHover(1395, 300, tab, false), true);
+  assert.equal(c.edgeHover(1370, 300, tab, false), false, 'not shown until the very edge');
+  assert.equal(c.edgeHover(1370, 300, tab, true), true, 'kept while moving onto it');
+  assert.equal(c.edgeHover(1300, 300, tab, true), false);
+  assert.equal(c.edgeHover(1399, 700, tab, false), false, 'outside the band');
+  const small = c.edgeTabPlacement({ left: 10, top: 300, width: 300, height: 20 }, { left: 0, top: 0, width: 320, height: 190 });
+  assert.ok(small.top >= 12 && small.top + small.height <= 178, 'stays inside a short viewport');
+  assert.ok(small.band.bottom > small.band.top);
+});

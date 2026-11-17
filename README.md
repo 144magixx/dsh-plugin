@@ -18,6 +18,8 @@
 | **会话导航 · Session Navigator** | [session-navigator](session-navigator/README.md) | 稳定标题配合最近话题、后台 Luna 摘要、悬停详情与最近访问，快速找回会话 | `dsh-session-navigator` |
 | **待办 · Todo** | [todo](todo/README.md) | 仿 iPhone 提醒事项：左侧导航完整页面与右侧卡片，智能列表、截止时间与旗标、关联会话、到点提醒，Agent 可读写 | `dsh-todo` |
 | **图片标注 · Image Annotate** | [image-annotate](image-annotate/README.md) | 双击输入框里的待发送图片进行标注（文字、圈画、箭头、序号、荧光笔、马赛克），保存后原位替换原图 | `dsh-image-annotate` |
+| **页面批注 · Page Annotate** | [page-annotate](page-annotate/README.md) | Codex 风格批注：在侧栏 HTML 预览里点选元素 / 框选区域，写意见、实时微调样式，带截图发送到对话（需下方 Better Sidebar 二开版） | `dsh-page-annotate` |
+| **Better Sidebar（二开）** | [better-sidebar](better-sidebar/FORK.md) | fork 自 [omdsh-dev/DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) v0.28.0：文件编辑区右上角「打开 ▾」一键外部打开并选择默认方式；新增 `editorActions` 扩展点。TypeScript 项目，需构建 | `dsh-better-sidebar` |
 
 ## 获取代码
 
